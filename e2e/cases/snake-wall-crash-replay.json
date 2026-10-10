@@ -1,0 +1,29 @@
+{
+  "id": "snake-wall-crash-replay",
+  "title": "Hitting the wall ends the run with my result, and one action replays",
+  "description": "Steering the snake into the wall ends the run with a game over message naming the final score, and the play-again action restarts at \"Score 0\" without reloading the page.",
+  "tags": [
+    "gameplay"
+  ],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run if one is not already running. Steer the snake into the wall and let the run end. Then start a fresh run using whatever the game offers to play again.",
+      "success": [
+        "Steering into the wall ended the run with a game over message naming the final score",
+        "The ended run settled on its result with no hang and no error",
+        "One obvious action, such as a Play again control, started a fresh run with the score reading exactly Score 0 again, without reloading the page"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}
