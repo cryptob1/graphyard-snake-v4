@@ -1,0 +1,32 @@
+name: Graphyard delivery
+# Written by graphyard init --scan --apply because no workflow of this repository ran on pull requests.
+# Edit the build and test commands freely (a rerun keeps your edits); graphyard-gate passes only when both jobs passed.
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "No build step was detected for this repository; replace this line with its build command"
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "No test step was detected for this repository; replace this line with its test command"
+  graphyard-gate:
+    needs: [build, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "$BUILD" = success && test "$TEST" = success
+        env:
+          BUILD: ${{ needs.build.result }}
+          TEST: ${{ needs.test.result }}

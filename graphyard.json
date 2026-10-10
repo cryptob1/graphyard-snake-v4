@@ -1,0 +1,30 @@
+{
+  "documentation": {
+    "paths": [
+      "README.md",
+      "AGENTS.md"
+    ],
+    "changelog": null
+  },
+  "delivery": {
+    "mode": "per-pr",
+    "mergeGate": {
+      "preMerge": [
+        {
+          "check": "graphyard-gate",
+          "command": null,
+          "source": "workflow",
+          "reason": "Graphyard's generated delivery workflow (.github/workflows/graphyard-delivery.yml): passes only when its build and test jobs passed"
+        }
+      ],
+      "perCandidate": []
+    },
+    "candidateSchedule": "0 */6 * * *",
+    "deploy": {
+      "adapter": "command",
+      "project": null,
+      "uat": null,
+      "production": null
+    }
+  }
+}
