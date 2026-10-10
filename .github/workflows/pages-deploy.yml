@@ -1,0 +1,43 @@
+name: Deploy to GitHub Pages
+# Serves the static Snake game (index.html at the repository root) on GitHub Pages.
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Check the public game page
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          for attempt in {1..12}; do
+            content_type=$(curl --fail --silent --show-error --location "$PAGE_URL" \
+              --output /tmp/snake-page.html --write-out '%{content_type}') || content_type=''
+            if [[ "$content_type" == text/html* ]] \
+              && grep -qi '<title>.*Snake' /tmp/snake-page.html \
+              && grep -qi '<canvas' /tmp/snake-page.html; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'The deployed Pages URL did not serve the Snake game.' >&2
+          exit 1
