@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snake</title>
+<style>
+  :root {
+    --bg: #10151c;
+    --panel: #18202b;
+    --grid: #1d2733;
+    --border: #5b7186;
+    --text: #e8eef4;
+    --muted: #9aabbb;
+    --snake: #4ccf73;
+    --head: #a6f0b9;
+    --food: #ff5d5d;
+    --accent: #3d8bfd;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+  h1 { margin: 0 0 8px; font-size: 2rem; letter-spacing: 0.04em; }
+  .bar {
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  #score { font-size: 1.25rem; font-weight: 600; }
+  button {
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: 6px;
+    padding: 8px 18px;
+    cursor: pointer;
+  }
+  button:focus-visible { outline: 3px solid var(--head); outline-offset: 2px; }
+  .board {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    background: var(--panel);
+    border: 3px solid var(--border);
+    border-radius: 4px;
+  }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: rgba(10, 14, 20, 0.82);
+    border-radius: 4px;
+    text-align: center;
+    padding: 16px;
+  }
+  .overlay[hidden] { display: none; }
+  .overlay h2 { margin: 0; font-size: 1.75rem; }
+  .overlay p { margin: 0; color: var(--muted); }
+  .help { margin-top: 12px; color: var(--muted); font-size: 0.9rem; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>Snake</h1>
+  <div class="bar">
+    <div id="score" aria-live="polite">Score 0</div>
+    <button id="start" type="button">Start</button>
+  </div>
+  <div class="board">
+    <canvas id="board" width="400" height="400" aria-label="Snake play area"></canvas>
+    <div id="gameover" class="overlay" role="alertdialog" aria-labelledby="gameover-title" hidden>
+      <h2 id="gameover-title">Game over</h2>
+      <p id="final-score">Final score: 0</p>
+      <button id="again" type="button">Play again</button>
+      <p>or press Space / Enter</p>
+    </div>
+  </div>
+  <p class="help">Press Start or an arrow key to begin. Steer with the arrow keys. Avoid the walls and your own tail.</p>
+
+<script>
+(function () {
+  "use strict";
+
+  var COLS = 20;
+  var ROWS = 20;
+  var TICK_MS = 140;
+  var START_LENGTH = 3;
+
+  var DIRS = {
+    ArrowUp: { x: 0, y: -1 },
+    ArrowDown: { x: 0, y: 1 },
+    ArrowLeft: { x: -1, y: 0 },
+    ArrowRight: { x: 1, y: 0 }
+  };
+
+  var canvas = document.getElementById("board");
+  var ctx = canvas && canvas.getContext ? canvas.getContext("2d") : null;
+  var scoreEl = document.getElementById("score");
+  var startBtn = document.getElementById("start");
+  var overlay = document.getElementById("gameover");
+  var finalEl = document.getElementById("final-score");
+  var againBtn = document.getElementById("again");
+
+  var state = null;
+  var timer = null;
+
+  // Fresh in-memory state: snake heading right in the middle, score 0.
+  function resetState() {
+    var midY = Math.floor(ROWS / 2);
+    var headX = Math.floor(COLS / 2);
+    var snake = [];
+    for (var i = 0; i < START_LENGTH; i++) snake.push({ x: headX - i, y: midY });
+    state = {
+      snake: snake,
+      dir: DIRS.ArrowRight,
+      queue: [],
+      food: null,
+      score: 0,
+      running: false,
+      over: false
+    };
+    state.food = spawnFood();
+    return state;
+  }
+
+  function occupied(x, y) {
+    for (var i = 0; i < state.snake.length; i++) {
+      if (state.snake[i].x === x && state.snake[i].y === y) return true;
+    }
+    return false;
+  }
+
+  // Pick a random free cell; null only when the snake fills the board.
+  function spawnFood() {
+    var free = [];
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = 0; x < COLS; x++) {
+        if (!occupied(x, y)) free.push({ x: x, y: y });
+      }
+    }
+    if (free.length === 0) return null;
+    return free[Math.floor(Math.random() * free.length)];
+  }
+
+  // Advance one cell. Returns "move", "eat", "wall", "self" or "full".
+  function step() {
+    if (state.queue.length) state.dir = state.queue.shift();
+    var head = state.snake[0];
+    var next = { x: head.x + state.dir.x, y: head.y + state.dir.y };
+
+    if (next.x < 0 || next.y < 0 || next.x >= COLS || next.y >= ROWS) {
+      gameOver();
+      return "wall";
+    }
+
+    var eating = state.food !== null && next.x === state.food.x && next.y === state.food.y;
+    // The tail cell is vacated this tick unless the snake is growing.
+    var bodyLen = eating ? state.snake.length : state.snake.length - 1;
+    for (var i = 0; i < bodyLen; i++) {
+      if (state.snake[i].x === next.x && state.snake[i].y === next.y) {
+        gameOver();
+        return "self";
+      }
+    }
+
+    state.snake.unshift(next);
+    if (eating) {
+      state.score += 1;
+      updateScore();
+      state.food = spawnFood();
+      if (state.food === null) {
+        gameOver();
+        return "full";
+      }
+      return "eat";
+    }
+    state.snake.pop();
+    return "move";
+  }
+
+  // Queue a turn, ignoring a reversal relative to the last queued heading.
+  function turn(key) {
+    var d = DIRS[key];
+    if (!d) return false;
+    var last = state.queue.length ? state.queue[state.queue.length - 1] : state.dir;
+    if (d === last || (d.x === -last.x && d.y === -last.y)) return false;
+    if (state.queue.length < 2) state.queue.push(d);
+    return true;
+  }
+
+  function updateScore() {
+    if (scoreEl) scoreEl.textContent = "Score " + state.score;
+  }
+
+  function render() {
+    if (!ctx) return;
+    var cw = canvas.width / COLS;
+    var ch = canvas.height / ROWS;
+    ctx.fillStyle = "#18202b";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#1d2733";
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = (y % 2); x < COLS; x += 2) ctx.fillRect(x * cw, y * ch, cw, ch);
+    }
+    if (state.food) {
+      ctx.fillStyle = "#ff5d5d";
+      ctx.beginPath();
+      ctx.arc((state.food.x + 0.5) * cw, (state.food.y + 0.5) * ch, Math.min(cw, ch) * 0.38, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (var i = state.snake.length - 1; i >= 0; i--) {
+      var s = state.snake[i];
+      ctx.fillStyle = i === 0 ? "#a6f0b9" : "#4ccf73";
+      ctx.fillRect(s.x * cw + 1, s.y * ch + 1, cw - 2, ch - 2);
+    }
+  }
+
+  function tick() {
+    step();
+    render();
+  }
+
+  function stopTimer() {
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  function start() {
+    stopTimer();
+    resetState();
+    state.running = true;
+    updateScore();
+    if (overlay) overlay.hidden = true;
+    if (startBtn) startBtn.textContent = "Restart";
+    render();
+    timer = setInterval(tick, TICK_MS);
+  }
+
+  function gameOver() {
+    stopTimer();
+    state.running = false;
+    state.over = true;
+    if (finalEl) finalEl.textContent = "Final score: " + state.score;
+    if (overlay) overlay.hidden = false;
+    if (againBtn && againBtn.focus) againBtn.focus();
+  }
+
+  function onKey(e) {
+    if (DIRS[e.key]) {
+      e.preventDefault();
+      if (state.over) return;
+      if (!state.running) start();
+      turn(e.key);
+      return;
+    }
+    if (e.key === " " || e.key === "Spacebar" || e.key === "Enter") {
+      // Buttons handle their own activation; only act for other targets.
+      var tag = e.target && e.target.tagName;
+      if (tag === "BUTTON") return;
+      if (state.over || !state.running) {
+        e.preventDefault();
+        start();
+      }
+    }
+  }
+
+  if (startBtn) startBtn.addEventListener("click", function () { start(); startBtn.blur && startBtn.blur(); });
+  if (againBtn) againBtn.addEventListener("click", function () { start(); againBtn.blur && againBtn.blur(); });
+  document.addEventListener("keydown", onKey);
+
+  resetState();
+  updateScore();
+  render();
+
+  // Exposed for tests; the game does not depend on it.
+  window.Snake = {
+    COLS: COLS, ROWS: ROWS, DIRS: DIRS,
+    resetState: resetState, spawnFood: spawnFood, step: step, turn: turn,
+    render: render, start: start, stop: stopTimer, gameOver: gameOver,
+    getState: function () { return state; }
+  };
+})();
+</script>
+</body>
+</html>
