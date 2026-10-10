@@ -1,0 +1,35 @@
+{
+  "id": "snake-run-starts-at-zero",
+  "title": "A live run moves on its own and starts at Score 0",
+  "description": "A run begins with the snake moving on its own across the board and the score display reading exactly \"Score 0\".",
+  "tags": [
+    "gameplay",
+    "scoring"
+  ],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run (use the start control if there is one). Then watch the board without touching any key and look at the score display.",
+      "success": [
+        "The snake was visibly moving on its own across the play area, without any key held",
+        "No error was shown"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    },
+    {
+      "kind": "browser",
+      "action": "expectText",
+      "text": "Score 0",
+      "exact": false
+    }
+  ]
+}

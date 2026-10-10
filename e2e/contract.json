@@ -1,0 +1,75 @@
+{
+  "outcomes": [
+    {
+      "id": "open-the-game",
+      "title": "I open the link and the Snake game is right there",
+      "criteria": [
+        "Opening the deployed link serves the game to anyone, with no install, account or login",
+        "The page names the game as Snake",
+        "The play area is on screen, with a run ready to start straight away or one obvious control to begin"
+      ],
+      "cases": [
+        "snake-game-page-serves"
+      ]
+    },
+    {
+      "id": "start-a-live-run",
+      "title": "When a run starts, the snake moves by itself and my score reads zero",
+      "criteria": [
+        "Starting a run puts a snake on the board that moves on its own, with no key held",
+        "My score is on screen from the first moment of play, starting at zero and reading exactly \"Score 0\"",
+        "The run plays with no error message or frozen board"
+      ],
+      "cases": [
+        "snake-run-starts-at-zero"
+      ]
+    },
+    {
+      "id": "steer-with-arrow-keys",
+      "title": "My arrow keys steer the snake",
+      "criteria": [
+        "The snake moves on its own, and my arrow keys turn it: Up, Down, Left and Right each steer the snake that way",
+        "I can play the whole game with the keyboard alone, with no account or extra setup",
+        "Steering never leaves the game stuck or erroring"
+      ],
+      "cases": [
+        "snake-arrow-keys-steer"
+      ]
+    },
+    {
+      "id": "food-grows-and-scores",
+      "title": "Eating food makes my snake longer and my score go up",
+      "criteria": [
+        "Food appears on the board where my steering can reach it",
+        "Eating a piece of food makes the snake visibly longer",
+        "Eating adds 1 to my score: the first piece reads exactly \"Score 1\", the next \"Score 2\", and so on"
+      ],
+      "cases": [
+        "snake-food-grows-and-scores"
+      ]
+    },
+    {
+      "id": "wall-crash-ends-run",
+      "title": "When I hit the wall my run ends with my result, and one action replays",
+      "criteria": [
+        "Steering my snake into the wall ends the run by itself, with a game over message naming my final score",
+        "No hang and no error: the ended run settles on its result",
+        "One obvious action, such as Play again, starts a fresh run immediately, back at exactly \"Score 0\", without reloading the page"
+      ],
+      "cases": [
+        "snake-wall-crash-replay"
+      ]
+    },
+    {
+      "id": "self-bite-ends-run",
+      "title": "The snake biting its own tail ends the run too",
+      "criteria": [
+        "Once the snake has grown long enough, steering its head into its own body ends the run",
+        "Self-collision ends the run with the same kind of game over message naming my final score that hitting the wall shows"
+      ],
+      "cases": [
+        "snake-self-bite-ends-run"
+      ]
+    }
+  ]
+}
