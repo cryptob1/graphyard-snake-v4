@@ -15,12 +15,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "No build step was detected for this repository; replace this line with its build command"
+      - name: Check game page and inline JavaScript
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { Script } from 'node:vm';
+          import assert from 'node:assert/strict';
+          const html = readFileSync('index.html', 'utf8');
+          assert.match(html, /^\s*<!doctype html>/i);
+          assert.match(html, /<html\b[^>]*>[\s\S]*<head\b[^>]*>[\s\S]*<\/head\s*>[\s\S]*<body\b[^>]*>[\s\S]*<\/body\s*>\s*<\/html\s*>\s*$/i);
+          assert.match(html, /<canvas\b[^>]*id="board"/i);
+          assert.match(html, /id="score"/i);
+          const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)];
+          assert.equal(scripts.length, 1, 'expected one complete inline script');
+          assert.ok(scripts[0][1].trim(), 'inline script is empty');
+          new Script(scripts[0][1], { filename: 'index.html inline script' });
+          NODE
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "No test step was detected for this repository; replace this line with its test command"
+      - run: node --test tests/snake.test.mjs
   graphyard-gate:
     needs: [build, test]
     if: always()
