@@ -212,7 +212,7 @@
       <div id="high-score">Best 0</div>
     </div>
     <div class="controls-bar">
-      <button id="cam-toggle" type="button" title="Switch 3D Camera (Key C)">🎥 Chase</button>
+      <button id="cam-toggle" type="button" title="Switch 3D Camera (Key C)">📐 Iso</button>
       <button id="mute-toggle" type="button" title="Toggle Audio (Key M)">🔊</button>
       <button id="start" type="button">Start</button>
     </div>
@@ -268,7 +268,7 @@
   var timer = null;
   var highScore = 0;
   var soundEnabled = true;
-  var cameraMode = "chase"; // "chase", "iso", "top"
+  var cameraMode = "iso"; // "iso", "chase", "top"
   var particles = [];
   var animFrameId = null;
 
@@ -506,6 +506,11 @@
         var s = gl.createShader(type);
         gl.shaderSource(s, src);
         gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+          var err = gl.getShaderInfoLog(s);
+          gl.deleteShader(s);
+          throw new Error("Shader compile error: " + err);
+        }
         return s;
       }
 
@@ -515,6 +520,11 @@
       gl.attachShader(glProgram, vs);
       gl.attachShader(glProgram, fs);
       gl.linkProgram(glProgram);
+      if (!gl.getProgramParameter(glProgram, gl.LINK_STATUS)) {
+        var pErr = gl.getProgramInfoLog(glProgram);
+        gl.deleteProgram(glProgram);
+        throw new Error("Program link error: " + pErr);
+      }
 
       glAttribs = {
         pos: gl.getAttribLocation(glProgram, "aPos"),
@@ -623,9 +633,12 @@
     }
   }
 
-  // 2D Canvas fallback (for headless Node.js unit tests or older browsers)
-  var ctx = canvas && canvas.getContext ? canvas.getContext("2d") : null;
-  initWebGL();
+  // Attempt 3D WebGL first; fall back to 2D canvas only if WebGL is unavailable (e.g. headless unit tests)
+  var ctx = null;
+  var hasWebGL = initWebGL();
+  if (!hasWebGL && canvas && canvas.getContext) {
+    try { ctx = canvas.getContext("2d"); } catch (e) {}
+  }
 
   function resetState() {
     var midY = Math.floor(ROWS / 2);
@@ -1022,11 +1035,11 @@
   }
 
   function cycleCamera() {
-    if (cameraMode === "chase") cameraMode = "iso";
-    else if (cameraMode === "iso") cameraMode = "top";
-    else cameraMode = "chase";
+    if (cameraMode === "iso") cameraMode = "chase";
+    else if (cameraMode === "chase") cameraMode = "top";
+    else cameraMode = "iso";
     if (camToggleBtn) {
-      var icons = { chase: "🎥 Chase", iso: "📐 Iso", top: "🗺️ Top" };
+      var icons = { iso: "📐 Iso", chase: "🎥 Chase", top: "🗺️ Top" };
       camToggleBtn.textContent = icons[cameraMode];
     }
   }
