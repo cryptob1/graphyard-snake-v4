@@ -9,6 +9,10 @@ Repository setup stores machine-specific CLI and connection settings in ignored
 Before editing, claim an authorized work item and use its assigned worktree.
 Check dependencies, blockers, current owner, and lease epoch. Use `handoff GY-N`
 to obtain the workspace and launch command for this machine.
+Keep the coordinator checkout as a clean detached checkout of the base branch
+(`origin/main` here). Never claim it or work in place on a branch; do all work
+in the assigned worktree. The coordinator checkout must stay detached so the
+master loop can align it between cycles and upgrade itself.
 
 Run agents through `watch GY-N EPOCH -- YOUR_AGENT_COMMAND`. The supervisor supplies
 `GRAPHYARD_CLI`, `GRAPHYARD_URL`, and worker identity to the child. Inside that
