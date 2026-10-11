@@ -70,6 +70,55 @@
       "cases": [
         "snake-self-bite-ends-run"
       ]
+    },
+    {
+      "id": "comfortable-default-pace",
+      "title": "The snake moves at a pace I can comfortably steer, right out of the box",
+      "criteria": [
+        "Starting a run, the snake advances at a calm, even pace with each step clearly followable — not a blur rushing across the board",
+        "In the 3D first-person view I have time between steps to spot what is ahead and turn before hitting a wall or reaching food",
+        "This comfortable pace is what I get by default the moment a run starts, with no settings or setup needed"
+      ],
+      "cases": [
+        "snake-default-pace-comfortable"
+      ]
+    },
+    {
+      "id": "speed-control-in-hud",
+      "title": "There is a speed control in the game that I can see and use",
+      "criteria": [
+        "The on-screen HUD shows a speed control offering Slow, Normal and Fast",
+        "The control names the speed currently in effect, starting at Normal",
+        "I can use it while a run is in progress, without reloading the page and without the run ending or breaking"
+      ],
+      "cases": [
+        "snake-speed-control-in-hud"
+      ]
+    },
+    {
+      "id": "speed-toggle-changes-pace",
+      "title": "Choosing Slow, Normal or Fast really changes how fast the snake goes",
+      "criteria": [
+        "Slow makes the snake noticeably slower than Normal — a careful, deliberate pace for tight steering",
+        "Fast makes it noticeably quicker than Normal for a livelier game",
+        "Normal sits between the two, and the control shows which speed is active as I switch",
+        "Steering, food and scoring still work the same way at every speed"
+      ],
+      "cases": [
+        "snake-speeds-slow-normal-fast"
+      ]
+    },
+    {
+      "id": "speed-choice-holds-while-playing",
+      "title": "The speed I pick stays with me while I play",
+      "criteria": [
+        "The snake keeps the pace I chose until I change it — it never drifts back on its own",
+        "Switching speed in the middle of a run does not freeze, restart or error anything; play simply continues at the new pace",
+        "I can play a full stretch of the game — steering, eating food, near misses — at whichever speed I picked, with scoring working as usual"
+      ],
+      "cases": [
+        "snake-speed-choice-holds-mid-run"
+      ]
     }
   ]
 }

@@ -1,0 +1,31 @@
+{
+  "id": "snake-speed-choice-holds-mid-run",
+  "title": "A chosen speed holds through play, and switching mid-run is safe",
+  "description": "After picking a speed, the pace holds for a whole stretch of play including eating and scoring, and switching speed mid-run just continues the game at the new pace without a restart or error.",
+  "tags": [
+    "gameplay",
+    "speed"
+  ],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run, choose Slow from the speed control, and play for a while: steer around, eat a piece of food, and note the score. Then switch to Fast in the middle of the same run and keep steering for a few more seconds. Watch whether the pace stays where you set it, whether the score still works, and whether anything freezes, restarts or errors when you switch.",
+      "success": [
+        "The pace stayed at the speed I chose for the whole stretch of play, not drifting back",
+        "Eating food still grew the snake and raised the score while playing at a chosen speed",
+        "Switching speed mid-run did not freeze, restart or error the game; the run simply continued at the new pace",
+        "No error was shown at any point"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}
