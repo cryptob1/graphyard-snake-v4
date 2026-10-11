@@ -1,0 +1,31 @@
+{
+  "id": "snake-default-pace-comfortable",
+  "title": "The snake's default pace is calm enough to steer comfortably",
+  "description": "A fresh run moves the snake at a calm, even pace that leaves a player time to see ahead and turn, in the 3D first-person view, with no setup required.",
+  "tags": [
+    "gameplay",
+    "speed"
+  ],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run if one is not already running. Watch the snake move for several seconds without touching anything, and judge the pace as a player would: can you follow each step and tell where the snake is heading in time to steer? If there is a first-person or 3D camera view, watch from there as the snake approaches a wall or the food.",
+      "success": [
+        "The snake moved at a calm, even pace with each step clearly followable, not rushed or blurry",
+        "There was enough time between steps to decide on a turn before reaching a wall or the food",
+        "The comfortable pace was already in place from the start, with no setting or setup needed",
+        "No error was shown"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "snake-speeds-slow-normal-fast",
+  "title": "Slow, Normal and Fast give clearly different paces",
+  "description": "Playing at Normal, then Slow, then Fast, the pace is clearly different each time — Slow visibly slower, Fast visibly faster, Normal in between — with steering working throughout.",
+  "tags": [
+    "gameplay",
+    "speed"
+  ],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run and watch for a few seconds to note how fast the snake moves at the Normal setting. Then use the speed control to choose Slow and watch the pace for a few seconds. Then choose Fast and watch again. Finally put it back to Normal. Judge every difference by eye, and steer with the arrow keys at each speed to confirm the snake still responds.",
+      "success": [
+        "Slow was clearly slower than Normal: each step took noticeably longer, an easy careful pace",
+        "Fast was clearly faster than Normal: the snake covered the board noticeably quicker",
+        "Normal sat between the two, and the control named whichever speed was in effect as it switched",
+        "The arrow keys still steered the snake correctly at every speed, with no error"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}

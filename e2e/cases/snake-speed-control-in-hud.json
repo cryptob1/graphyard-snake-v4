@@ -1,0 +1,36 @@
+{
+  "id": "snake-speed-control-in-hud",
+  "title": "A speed control sits in the HUD and works during a run",
+  "description": "The HUD offers Slow, Normal and Fast, names the active speed starting at Normal, and lets me change speed mid-run without the run ending or the page reloading.",
+  "tags": [
+    "gameplay",
+    "hud"
+  ],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "browser",
+      "action": "expectText",
+      "text": "Normal",
+      "exact": false
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run if one is not already running. Find the speed control in the on-screen HUD — it should offer Slow, Normal and Fast. Click it to change the speed while the run is still going, and watch what happens to the game and to the control itself.",
+      "success": [
+        "A speed control was visible in the HUD, offering Slow, Normal and Fast choices",
+        "Using it changed the speed while the run kept going, with no page reload, freeze or error",
+        "The control showed which speed was now in effect"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}
