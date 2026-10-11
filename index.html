@@ -398,6 +398,7 @@
       <div id="high-score">Best 0</div>
     </div>
     <div class="controls-bar">
+      <button id="speed-toggle" type="button" title="Toggle Game Speed (Key X)">🐢 Normal</button>
       <button id="cam-toggle" type="button" title="Switch Camera (Key C)">👹 1st Person</button>
       <button id="mute-toggle" type="button" title="Toggle Audio (Key M)">🔊</button>
       <button id="start" type="button">Start</button>
@@ -464,7 +465,7 @@
     <button id="turn-right-btn" type="button" aria-label="Turn Right">Turn Right (D) ▶</button>
   </div>
 
-  <p class="help">Steer: <b>Arrow Keys</b> or <b>WASD</b> &bull; Turn Left/Right: <b>A/D</b> &bull; Camera: <b>C</b> &bull; Sound: <b>M</b> &bull; Restart: <b>Space</b></p>
+  <p class="help">Steer: <b>Arrow Keys</b> or <b>WASD</b> &bull; Turn: <b>A/D</b> &bull; Speed: <b>X</b> &bull; Camera: <b>C</b> &bull; Sound: <b>M</b> &bull; Restart: <b>Space</b></p>
 
 <script>
 (function () {
@@ -472,7 +473,13 @@
 
   var COLS = 20;
   var ROWS = 20;
-  var TICK_MS = 135;
+  var SPEEDS = {
+    normal: { ms: 210, label: "🐢 Normal", name: "normal" },
+    slow: { ms: 280, label: "🦥 Slow", name: "slow" },
+    fast: { ms: 140, label: "⚡ Fast", name: "fast" }
+  };
+  var currentSpeed = "normal";
+  var TICK_MS = SPEEDS[currentSpeed].ms;
   var START_LENGTH = 3;
 
   var DIRS = {
@@ -495,6 +502,7 @@
   var finalEl = document.getElementById("final-score");
   var againBtn = document.getElementById("again");
   var camToggleBtn = document.getElementById("cam-toggle");
+  var speedToggleBtn = document.getElementById("speed-toggle");
   var muteToggleBtn = document.getElementById("mute-toggle");
   var bonusBanner = document.getElementById("bonus-banner");
   var compassEl = document.getElementById("compass");
@@ -1465,6 +1473,18 @@
     updateCameraUI();
   }
 
+  function cycleSpeed() {
+    if (currentSpeed === "normal") currentSpeed = "slow";
+    else if (currentSpeed === "slow") currentSpeed = "fast";
+    else currentSpeed = "normal";
+    TICK_MS = SPEEDS[currentSpeed].ms;
+    if (speedToggleBtn) speedToggleBtn.textContent = SPEEDS[currentSpeed].label;
+    if (state && state.running && timer !== null) {
+      clearInterval(timer);
+      timer = setInterval(tick, TICK_MS);
+    }
+  }
+
   function toggleMute() {
     soundEnabled = !soundEnabled;
     if (muteToggleBtn) muteToggleBtn.textContent = soundEnabled ? "🔊" : "🔇";
@@ -1501,6 +1521,11 @@
       turn(key);
       return;
     }
+    if (key === "x" || key === "X") {
+      e.preventDefault();
+      cycleSpeed();
+      return;
+    }
     if (key === "c" || key === "C") {
       e.preventDefault();
       cycleCamera();
@@ -1523,6 +1548,7 @@
 
   if (startBtn) startBtn.addEventListener("click", function () { start(); startBtn.blur && startBtn.blur(); });
   if (againBtn) againBtn.addEventListener("click", function () { start(); againBtn.blur && againBtn.blur(); });
+  if (speedToggleBtn) speedToggleBtn.addEventListener("click", function () { cycleSpeed(); speedToggleBtn.blur && speedToggleBtn.blur(); });
   if (camToggleBtn) camToggleBtn.addEventListener("click", function () { cycleCamera(); camToggleBtn.blur && camToggleBtn.blur(); });
   if (muteToggleBtn) muteToggleBtn.addEventListener("click", function () { toggleMute(); muteToggleBtn.blur && muteToggleBtn.blur(); });
 
