@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync as readJsonFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = join(root, '.github/workflows/pages-deploy.yml');
@@ -53,4 +56,34 @@ test('integration:pages-workflow serves index.html from the uploaded root', () =
   const html = readFileSync(join(root, 'index.html'), 'utf8');
   assert.match(html, /Snake/, 'the served page names Snake');
   assert.match(html, /<canvas\b/i, 'the served page has a play area');
+});
+
+test('integration:pages-workflow resolves all three recorded API-rate-limit deployment faults', () => {
+  const base = execFileSync('git', ['show', 'e47fd668aa93b2580357ac7bc0ae4b2b5f4fecc3:.github/workflows/pages-deploy.yml'], { cwd: root, encoding: 'utf8' });
+  const faults = [
+    '2026-10-14T04:04:21.932Z',
+    '2026-10-14T05:02:44.808Z',
+    '2026-10-14T06:02:56.508Z',
+  ];
+  const hasIndependentEndpoint = source =>
+    /printf '\{"sha":"%s"\}\\n' "\$GITHUB_SHA" > deployment\.json/.test(source)
+    && source.indexOf('deployment.json') < source.indexOf('actions/upload-pages-artifact@')
+    && source.includes('${PAGE_URL%/}/deployment.json')
+    && source.includes('"$deployed_sha" == "$GITHUB_SHA"');
+
+  for (const at of faults) {
+    assert.equal(hasIndependentEndpoint(base), false, `${at}: base cannot verify a deployment when GitHub API returns 403`);
+    assert.equal(hasIndependentEndpoint(workflow), true, `${at}: candidate serves and checks the exact SHA without GitHub API`);
+  }
+
+  const temporary = mkdtempSync(join(tmpdir(), 'pages-deployment-'));
+  const sha = '0123456789abcdef0123456789abcdef01234567';
+  try {
+    execFileSync('bash', ['-c', 'printf \'{"sha":"%s"}\\n\' "$GITHUB_SHA" > deployment.json'], {
+      cwd: temporary, env: { ...process.env, GITHUB_SHA: sha },
+    });
+    assert.deepEqual(JSON.parse(readJsonFileSync(join(temporary, 'deployment.json'), 'utf8')), { sha });
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
 });
