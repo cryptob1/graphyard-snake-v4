@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Record the exact commit in the Pages artifact
+        run: printf '{"sha":"%s"}\n' "$GITHUB_SHA" > deployment.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
@@ -40,4 +42,18 @@ jobs:
             sleep 10
           done
           echo 'The deployed Pages URL did not serve the Snake game.' >&2
+          exit 1
+      - name: Check the public deployment commit
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          for attempt in {1..12}; do
+            deployed_sha=$(curl --fail --silent --show-error --location "${PAGE_URL%/}/deployment.json" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || deployed_sha=''
+            if [[ "$deployed_sha" == "$GITHUB_SHA" ]]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'The deployed Pages URL did not report the deployed commit.' >&2
           exit 1
