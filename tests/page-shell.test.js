@@ -110,3 +110,33 @@ test('integration:asset-budget page plus assets stay under 60 KB with no externa
   }
   assert.ok(total < BUDGET_BYTES, `total ${total} bytes under ${BUDGET_BYTES}`);
 });
+
+test('unit:page-content Start resets the score to "Score 0" and moves the snake by itself until the wall', async () => {
+  const { wireStart, GRID } = await import('../js/main.js');
+  const ctx = new Proxy({}, { get: () => () => {}, set: () => true });
+  const canvas = { width: 400, height: 400, getContext: () => ctx };
+  const listeners = {};
+  const start = { disabled: false, addEventListener: (type, fn) => { listeners[type] = fn; } };
+  const score = { textContent: 'Score 7' };
+  let tick = null;
+  let cleared = 0;
+  const run = wireStart({
+    canvas, start, score,
+    setInterval: fn => { tick = fn; return 1; },
+    clearInterval: () => { cleared++; },
+  });
+  assert.equal(run.running(), false, 'idle until Start');
+  listeners.click();
+  assert.equal(score.textContent, 'Score 0');
+  assert.equal(run.running(), true);
+  assert.equal(start.disabled, true, 'Start is disabled while a run is moving');
+  const [x0, y0] = run.snake()[0];
+  tick();
+  assert.deepEqual(run.snake()[0], [x0 + 1, y0], 'head advanced one cell');
+  assert.equal(run.snake().length, 3, 'length unchanged');
+  for (let i = 0; i < GRID; i++) tick();
+  assert.equal(run.snake()[0][0], GRID - 1, 'head stops at the last column');
+  assert.equal(run.running(), false, 'run ends at the wall');
+  assert.equal(cleared, 1);
+  assert.equal(start.disabled, false, 'Start is available again');
+});
