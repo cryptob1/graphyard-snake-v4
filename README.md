@@ -103,3 +103,37 @@ first succeeds on `main`. To check a deploy, open the deploy job's run on `main`
 `tests/pages-deploy-workflow.test.js` checks the deploy job: the official Pages
 actions, its permissions and environment, no secret or branch push, and that it runs
 only on push to `main` after build and test.
+
+## Graphyard worker capacity
+
+The repository declares how many worker profiles its Graphyard installation runs
+in `graphyard.json`:
+
+```json
+"capacity": { "workers": 2 }
+```
+
+A worker profile holds at most one ready item at a time, so a plan whose items
+touch disjoint files and could run in parallel would serialize on a single
+profile: every sibling dispatch waits for the one profile to free, and ready→claim
+runs far past its 2-minute budget while the sibling delivers. With two profiles,
+two ready items with disjoint planned files are claimed in the same dispatch
+cycle. `tests/worker-capacity.test.js` pins the declaration and the plan that
+reconciles a host to it.
+
+From the coordinator checkout — the one whose `.graphyard/` holds `master.json`,
+never a managed worktree — reconcile the host to the declaration:
+
+```sh
+node scripts/graphyard-executor.mjs --status    # show the declaration and the live profiles
+node scripts/graphyard-executor.mjs --install   # bring the installation up to the declared count
+```
+
+`--install` uses only Graphyard's own commands: `graphyard principal add
+<install>-worker-N --role worker` for each principal the roster lacks, a copy of
+the new credential where `master environments` discovers worker credentials, and
+`graphyard master environments --apply` to write the launch profile into
+`.graphyard/master.json`, which the master loop adopts on its next tick without a
+restart. It is idempotent, `--count N` overrides the declaration for one run, and
+it never removes a profile: lowering the count is reported, and the removal stays
+an operator action.
