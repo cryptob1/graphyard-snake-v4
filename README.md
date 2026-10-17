@@ -82,17 +82,19 @@ requests.
 `.github/workflows/graphyard-delivery.yml` runs on every pull request and push to
 `main` (Node 26): the build job checks that `index.html` exists and every JavaScript
 file parses, and the test job runs `node --test tests/`. Graphyard's merge gate
-(`graphyard-gate`) passes only when both pass. On push to `main`, the deploy job
-publishes the repository root as-is (no build, no dependencies) to GitHub Pages at
-<https://cryptob1.github.io/graphyard-snake-v4/>: it commits the checked-out files
-(plus `.nojekyll`) as the single commit of the `gh-pages` branch and pushes it over
-SSH with the repository's provisioned deploy key, never the workflow token.
+(`graphyard-gate`) passes only when both pass. On push to `main`, once build and
+test pass, the deploy job publishes the repository root as-is (no build, no
+dependencies) to GitHub Pages at <https://cryptob1.github.io/graphyard-snake-v4/>
+with the official Pages actions: `actions/upload-pages-artifact` uploads the
+checked-out files and `actions/deploy-pages` deploys them to the `github-pages`
+environment. The job authenticates with its own `pages: write` and `id-token: write`
+permissions, so it needs no repository secret and pushes no branch.
 
-The deploy needs two repository settings:
+The deploy needs one repository setting: Settings → Pages → Source is
+"GitHub Actions".
 
-- the `DEPLOY_KEY` Actions secret holds the private half of a deploy key registered
-  on this repository with write access (the job fails with an error when it is unset);
-- Settings → Pages → Source is "Deploy from a branch", branch `gh-pages`, folder `/`.
-
-`tests/delivery-workflow.test.js` checks that workflow: the test command, the
-unchanged `graphyard-gate` job, and the deploy-key Pages publish on push to `main`.
+`tests/delivery-workflow.test.js` checks that workflow's test command, the unchanged
+`graphyard-gate` job and that publishing adds no build step;
+`tests/pages-deploy-workflow.test.js` checks the deploy job: the official Pages
+actions, its permissions and environment, no secret or branch push, and that it runs
+only on push to `main` after build and test.
