@@ -37,6 +37,9 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+/* Swipes steer the snake here, so a gesture must never become a scroll: the
+   board turns the browser's touch handling off with touch-action none (the
+   swipe module's preventDefault on touchmove makes the same promise in code). */
 .board {
   display: block;
   width: 100%;
@@ -49,6 +52,7 @@ h1 {
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .start {
@@ -65,4 +69,27 @@ h1 {
 .start:focus-visible {
   outline: 3px solid #e8eef5;
   outline-offset: 2px;
+}
+
+/* Phone play: on a narrow screen the whole game — heading, readouts, board,
+   control — fits one view with room for a thumb to swipe, so nothing has to
+   scroll and the Start/Play again control stays an easy tap. */
+@media (max-width: 480px) {
+  .game {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  .hud {
+    font-size: 1rem;
+  }
+
+  .start {
+    padding: 12px 32px;
+    font-size: 1.25rem;
+  }
 }
