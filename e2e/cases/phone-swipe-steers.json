@@ -1,0 +1,33 @@
+{
+  "id": "phone-swipe-steers",
+  "title": "Swiping on a phone steers the snake",
+  "description": "On a phone-sized screen the game opens and plays with no keyboard, and swiping across the board turns the snake without scrolling the page away.",
+  "tags": [],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "browser",
+      "action": "expectText",
+      "text": "Snake",
+      "exact": false
+    },
+    {
+      "kind": "agent",
+      "goal": "Make the view phone-sized, using device emulation or a narrow window if no real phone is attached. On the Snake game, start a run if one is not already running. Then swipe up across the play area and watch the snake; then swipe left across it and watch; then swipe down across it and watch. While swiping, notice whether the page itself scrolls away from the game or anything breaks.",
+      "success": [
+        "The game was playable on a phone-sized screen with no keyboard",
+        "Swiping up turned the snake upward and swiping left turned it leftward, and swiping down turned it downward",
+        "The page did not scroll away from the game while swiping, and the run kept going with no error"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}

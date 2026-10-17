@@ -1,0 +1,42 @@
+{
+  "id": "open-and-play-right-away",
+  "title": "Opening the link serves the Snake game, ready to play",
+  "description": "Anyone who opens the deployed link gets the game with no install or account: the page answers, names the game, and shows a play area ready to start within a couple of seconds.",
+  "tags": [],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "browser",
+      "action": "expectText",
+      "text": "Snake",
+      "exact": false
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game page, look at what it shows without signing in or installing anything. Check whether a play area (the game board) is visible, whether a run can be started right away, either because it is already running or through one obvious start control, and whether the game was ready to play within a couple of seconds of the page opening.",
+      "success": [
+        "A play area was visible on the page",
+        "A run could be started right away, either already live or through one obvious start control",
+        "The game was ready to play within a couple of seconds, with no long loading wait",
+        "No error or blank page was shown"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    },
+    {
+      "kind": "http",
+      "name": "the deployed link answers",
+      "method": "GET",
+      "path": "/",
+      "status": 200,
+      "expect": []
+    }
+  ]
+}

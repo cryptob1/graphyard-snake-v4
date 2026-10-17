@@ -1,0 +1,29 @@
+{
+  "id": "wasd-keys-steer",
+  "title": "The WASD keys steer the snake too",
+  "description": "With a run live, pressing W, then A, then S, then D turns the snake upward, leftward, downward and rightward respectively.",
+  "tags": [],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run if one is not already running. Then press the W key once and watch where the snake goes; then press A once and watch; then press S once and watch; then press D once and watch.",
+      "success": [
+        "After pressing W the snake turned and moved upward",
+        "After pressing A the snake turned and moved leftward",
+        "After pressing S the snake turned and moved downward",
+        "After pressing D the snake turned and moved rightward",
+        "The game kept running smoothly with no error and no stuck board"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "id": "self-bite-ends-run",
+  "title": "A grown snake biting its own body ends the run at game over",
+  "description": "After the snake has grown by eating, steering its head into its own body ends the run with the same kind of game over message naming the final score.",
+  "tags": [],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run if one is not already running. Steer with the arrow keys to eat food until the snake has grown clearly longer, then steer the snake's head into its own body and watch what happens.",
+      "success": [
+        "After the snake had grown, steering its head into its own body ended the run",
+        "The run ended with a game over message naming the final score, the same kind of ending as hitting the wall"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}

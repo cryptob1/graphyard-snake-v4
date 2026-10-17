@@ -1,0 +1,33 @@
+{
+  "id": "live-run-moves-score-zero",
+  "title": "A live run moves on its own in grid steps and starts at Score 0",
+  "description": "A run begins with the snake moving on its own in grid steps across the board and the score display reading exactly \"Score 0\".",
+  "tags": [],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run (use the start control if there is one). Then watch the board without touching any key and look closely at how the snake moves and at the score display.",
+      "success": [
+        "The snake was visibly moving on its own across the play area, without any key held",
+        "The snake moved in distinct grid steps rather than drifting freely",
+        "No error was shown and the board did not freeze"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    },
+    {
+      "kind": "browser",
+      "action": "expectText",
+      "text": "Score 0",
+      "exact": false
+    }
+  ]
+}

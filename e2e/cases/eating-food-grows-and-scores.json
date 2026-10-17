@@ -1,0 +1,28 @@
+{
+  "id": "eating-food-grows-and-scores",
+  "title": "Eating one food grows the snake and reads Score 1, then Score 2",
+  "description": "Food is visible on the board; steering the snake onto one piece makes it visibly longer and the score reads exactly \"Score 1\", and a second piece reads \"Score 2\".",
+  "tags": [],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run if one is not already running. Steer the snake with the arrow keys until it eats exactly one piece of food, then look closely at the snake and at the score display. Then keep steering until it eats a second piece, and look at the score display again.",
+      "success": [
+        "Food was visible on the board where steering could reach it",
+        "The snake was visibly longer right after eating the first piece of food",
+        "After eating one piece of food the score read exactly Score 1",
+        "After eating a second piece of food the score read exactly Score 2"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}
