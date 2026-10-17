@@ -52,3 +52,5 @@ file parses, and the test job runs `node --test tests/`. Graphyard's merge gate
 (`graphyard-gate`) passes only when both pass. On push to `main`, the deploy job
 publishes the repository root as-is (no build, no dependencies) to GitHub Pages at
 <https://cryptob1.github.io/graphyard-snake-v4/>.
+`tests/delivery-workflow.test.js` checks that workflow: the test command, the
+unchanged `graphyard-gate` job, and the Pages publish on push to `main`.
