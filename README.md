@@ -55,3 +55,23 @@ checks the page content, serves the repository root over
 plain static HTTP to confirm every referenced asset answers with the right content
 type, and keeps the page plus its assets under a 60 KB budget with no external
 requests.
+
+## CI and deploy
+
+`.github/workflows/graphyard-delivery.yml` runs on every pull request and push to
+`main` (Node 26): the build job checks that `index.html` exists and every JavaScript
+file parses, and the test job runs `node --test tests/`. Graphyard's merge gate
+(`graphyard-gate`) passes only when both pass. On push to `main`, the deploy job
+publishes the repository root as-is (no build, no dependencies) to GitHub Pages at
+<https://cryptob1.github.io/graphyard-snake-v4/>: it commits the checked-out files
+(plus `.nojekyll`) as the single commit of the `gh-pages` branch and pushes it over
+SSH with the repository's provisioned deploy key, never the workflow token.
+
+The deploy needs two repository settings:
+
+- the `DEPLOY_KEY` Actions secret holds the private half of a deploy key registered
+  on this repository with write access (the job fails with an error when it is unset);
+- Settings → Pages → Source is "Deploy from a branch", branch `gh-pages`, folder `/`.
+
+`tests/delivery-workflow.test.js` checks that workflow: the test command, the
+unchanged `graphyard-gate` job, and the deploy-key Pages publish on push to `main`.
