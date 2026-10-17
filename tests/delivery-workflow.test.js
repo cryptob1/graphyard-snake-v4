@@ -62,27 +62,29 @@ test('integration:ci-test-command graphyard-gate passes only when build and test
   assert.match(yaml, /^on:\n  pull_request:\n  push:\n    branches: \["main"\]\n/m);
 });
 
-test('integration:pages-publish-step on push to main the repository root is published to Pages', async () => {
+test('integration:pages-publish-step on push to main the repository root is published to Pages with the deploy key', async () => {
   const deploy = jobs(await readWorkflow()).deploy;
   assert.ok(deploy, 'the workflow has a deploy job');
   assert.match(deploy, /^    needs: \[build, test\]$/m);
   assert.match(deploy, /^    if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'$/m);
-  assert.match(deploy, /^      pages: write$/m);
-  assert.match(deploy, /^      id-token: write$/m);
-  assert.match(deploy, /^      name: github-pages$/m);
-  assert.deepEqual(uses(deploy), [
-    'actions/checkout@v4',
-    'actions/configure-pages@v5',
-    'actions/upload-pages-artifact@v3',
-    'actions/deploy-pages@v4',
-  ]);
-  assert.match(deploy, /upload-pages-artifact@v3\n        with:\n          path: \.\n/);
+  // The publish authenticates with the provisioned deploy key, not the workflow token:
+  // the job token stays read-only and no Pages/OIDC token is requested.
+  assert.match(deploy, /^    permissions:\n      contents: read\n    concurrency:/m);
+  assert.doesNotMatch(deploy, /pages: write|id-token: write|GITHUB_TOKEN|github\.token/);
+  assert.deepEqual(uses(deploy), ['actions/checkout@v4']);
+  assert.match(deploy, /- uses: actions\/checkout@v4\n        with:\n          ssh-key: \$\{\{ secrets\.DEPLOY_KEY \}\}\n/);
+  // A missing deploy key fails the job with a clear error instead of falling back to the token.
+  assert.match(deploy, /- run: test -n "\$DEPLOY_KEY" \|\| \{ echo "::error::[^"]*"; exit 1; \}\n        env:\n          DEPLOY_KEY: \$\{\{ secrets\.DEPLOY_KEY \}\}\n/);
+  // The whole checked-out root (plus .nojekyll) becomes gh-pages, pushed over the SSH remote.
+  assert.match(deploy, /touch \.nojekyll\n\s+git add -f \.nojekyll\n/);
+  assert.match(deploy, /commit=\$\(git commit-tree "\$\(git write-tree\)" -m "[^"]*"\)\n/);
+  assert.match(deploy, /git push --force origin "\$commit:refs\/heads\/gh-pages"\n/);
 });
 
 test('integration:pages-publish-step publishing adds no build step and no dependencies', async () => {
   const yaml = await readWorkflow();
   const deploy = jobs(yaml).deploy;
-  assert.deepEqual(runs(deploy), [], 'the deploy job runs no commands');
+  assert.doesNotMatch(deploy.slice(deploy.indexOf('    steps:')), /setup-node|npm|npx|yarn|pnpm|build/i, 'the deploy job only commits and pushes the checked-out files');
   assert.doesNotMatch(yaml, /npm (ci|install)|yarn|pnpm/);
   const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
   assert.equal(pkg.dependencies, undefined);
