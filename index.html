@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Snake</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="game">
+    <h1>Snake</h1>
+    <div class="hud">
+      <span id="score" class="score" aria-live="polite">Score 0</span>
+      <span id="best" class="best">Best 0</span>
+    </div>
+    <canvas id="board" class="board" width="400" height="400" aria-label="Snake play area"></canvas>
+    <button id="start" class="start" type="button">Start</button>
+  </main>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
