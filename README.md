@@ -10,15 +10,19 @@ launches a run at `Score 0`: the snake moves by itself, one cell per tick, and y
 steer it with the **arrow keys** or **W/A/S/D**. Eating food grows the snake and
 raises the score by one. Hitting a wall or biting its own tail ends the run with
 a game-over message naming the final score and a **Play again** button that
-starts a fresh run without reloading the page. Swipes on a phone and the
-remembered best score are not playable yet; they arrive with the later plan
-items.
+starts a fresh run without reloading the page. The **best** score is kept
+across runs and visits: when a run ends the best readout shows the greatest
+score reached so far (this run included when it is the new best), it is stored
+in the browser's `localStorage`, and reopening the game later in the same
+browser still shows it — a later worse run never lowers it. Swipes on a phone
+are not playable yet; they arrive with a later plan item.
 
 ## What's on the page
 
 - `index.html` — the game page: the **Snake** heading, the score readout (starts at
-  `Score 0`), the best readout, the canvas play area, the **Start** button, and
-  the hidden game-over overlay (final score plus **Play again**) that appears
+  `Score 0`), the best readout (restored from the remembered best when the page
+  opens), the canvas play area, the **Start** button, and the
+  hidden game-over overlay (final score plus **Play again**) that appears
   when a run ends.
 - `css/style.css` — responsive layout; the board keeps a square aspect and sets
   `touch-action: none` so swipes on a phone never scroll the page.
@@ -27,7 +31,11 @@ items.
 - `js/main.js` — ES-module boot that wires the engine to the page: it draws the
   board, runs the tick timer, renders the score after every tick, steers with
   the keyboard and with `snake-steer` document events (so later input modes can
-  reuse the same path), and drives game over and **Play again**.
+  reuse the same path), and drives game over, **Play again** and the best score.
+- `js/best-score.js` — the best-score store over `localStorage`: it reads the
+  remembered best at page load and renders it into the best readout, and on run
+  end it keeps and stores the greatest of the remembered best and the final
+  score, so a worse run never lowers it.
 
 Plain HTML, CSS and JavaScript: no build step and no runtime dependencies.
 
@@ -50,7 +58,9 @@ npm test        # same as: node --test
 
 `tests/game-engine.test.js` covers the pure engine, `tests/ui-wiring.test.js`
 the page wiring (live run, keyboard steering, score and growth, game over and
-Play again) on hand-rolled DOM and canvas stubs, and `tests/page-shell.test.js`
+Play again) on hand-rolled DOM and canvas stubs, `tests/best-score.test.js` the
+remembered best score (the readout at run end, persistence across a simulated
+fresh page load) on a localStorage stub, and `tests/page-shell.test.js`
 checks the page content, serves the repository root over
 plain static HTTP to confirm every referenced asset answers with the right content
 type, and keeps the page plus its assets under a 60 KB budget with no external
