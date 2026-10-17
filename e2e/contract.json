@@ -1,0 +1,112 @@
+{
+  "outcomes": [
+    {
+      "id": "open-and-play",
+      "title": "I open the link and the Snake game is right there, ready to play",
+      "criteria": [
+        "Opening the deployed link serves the game to anyone, with no install, account or login",
+        "The page names the game as Snake",
+        "The play area is on screen, with a run ready to start straight away or one obvious control to begin",
+        "The game is ready to play within a couple of seconds of opening the link, with no long loading wait"
+      ],
+      "cases": [
+        "open-and-play-right-away"
+      ]
+    },
+    {
+      "id": "live-run-at-zero",
+      "title": "When a run starts, the snake moves by itself on the grid and my score reads zero",
+      "criteria": [
+        "Starting a run puts a snake on the board that moves on its own, with no key held",
+        "The snake moves in grid steps across the play area, not drifting freely",
+        "My score is on screen from the first moment of play, starting at zero and reading exactly \"Score 0\"",
+        "The run plays with no error message or frozen board"
+      ],
+      "cases": [
+        "live-run-moves-score-zero"
+      ]
+    },
+    {
+      "id": "arrow-keys-steer",
+      "title": "My arrow keys steer the snake",
+      "criteria": [
+        "The snake moves on its own, and my arrow keys turn it: Up, Down, Left and Right each steer the snake that way",
+        "I can play the whole game with the arrow keys alone, with no account or extra setup",
+        "Steering never leaves the game stuck or erroring"
+      ],
+      "cases": [
+        "arrow-keys-steer"
+      ]
+    },
+    {
+      "id": "wasd-steers",
+      "title": "I can steer with WASD instead, key for key",
+      "criteria": [
+        "W steers the snake upward, A leftward, S downward and D rightward",
+        "I can play the whole game with WASD alone, with no account or extra setup"
+      ],
+      "cases": [
+        "wasd-keys-steer"
+      ]
+    },
+    {
+      "id": "food-grows-score-rises",
+      "title": "Eating food makes my snake longer and my score go up",
+      "criteria": [
+        "Food appears on the board where my steering can reach it",
+        "Eating a piece of food makes the snake visibly longer",
+        "Eating adds 1 to my score: the first piece reads exactly \"Score 1\", the next \"Score 2\", and so on"
+      ],
+      "cases": [
+        "eating-food-grows-and-scores"
+      ]
+    },
+    {
+      "id": "wall-crash-replay",
+      "title": "When I hit the wall my run ends with a clear game-over and one action replays",
+      "criteria": [
+        "Steering my snake into the wall ends the run by itself, with a game over message naming my final score",
+        "No hang and no error: the ended run settles on its result",
+        "One obvious action, such as Play again, starts a fresh run immediately, back at exactly \"Score 0\", without reloading the page"
+      ],
+      "cases": [
+        "wall-crash-game-over-replay"
+      ]
+    },
+    {
+      "id": "self-bite-ends-run",
+      "title": "The snake biting its own tail ends the run too",
+      "criteria": [
+        "Once the snake has grown long enough, steering its head into its own body ends the run",
+        "Self-collision ends the run with the same kind of game over message naming my final score that hitting the wall shows"
+      ],
+      "cases": [
+        "self-bite-ends-run"
+      ]
+    },
+    {
+      "id": "best-score-remembered",
+      "title": "My best score is still there the next time I visit",
+      "criteria": [
+        "After a run ends, the game shows my best score, including this run's final score if it was the best so far",
+        "Leaving the page and coming back later in the same browser still shows that same best score",
+        "A later worse run does not lower the remembered best score"
+      ],
+      "cases": [
+        "best-score-survives-revisit"
+      ]
+    },
+    {
+      "id": "swipe-steers-on-phone",
+      "title": "On my phone I steer the snake by swiping",
+      "criteria": [
+        "On a phone-sized screen the game opens and plays with no keyboard needed",
+        "Swiping up, down, left or right across the board turns the snake that way",
+        "Swiping to steer does not scroll the page away from the game or break the run"
+      ],
+      "cases": [
+        "phone-swipe-steers"
+      ]
+    }
+  ]
+}

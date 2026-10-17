@@ -1,0 +1,30 @@
+{
+  "id": "arrow-keys-steer",
+  "title": "The arrow keys steer the snake, all four directions",
+  "description": "The snake already moves on its own; each arrow key in turn turns the snake in that direction, with the arrow keys alone enough to play.",
+  "tags": [],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run if one is not already running. First watch without touching anything: the snake should already be moving. Then press the Up arrow key once and watch where the snake goes; then press the Left arrow key once and watch; then press the Down arrow key once and watch; then press the Right arrow key once and watch.",
+      "success": [
+        "The snake was already moving on its own before any key was pressed",
+        "After pressing Up the snake turned and moved upward",
+        "After pressing Left the snake turned and moved leftward",
+        "After pressing Down the snake turned and moved downward",
+        "After pressing Right the snake turned and moved rightward",
+        "The game kept running smoothly with no error and no stuck board"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": "best-score-survives-revisit",
+  "title": "My best score is still there the next time I visit",
+  "description": "A run ending at a scored best is still shown as the best score after leaving and reopening the game in the same browser, and a later worse run does not lower it.",
+  "tags": [],
+  "target": "uat",
+  "required": true,
+  "secrets": [],
+  "steps": [
+    {
+      "kind": "browser",
+      "action": "open",
+      "path": "/"
+    },
+    {
+      "kind": "agent",
+      "goal": "On the Snake game, start a run and steer with the arrow keys to eat at least two pieces of food so the score reads 2, then steer into the wall so the run ends. Note exactly what best score the game shows. Then leave the game page entirely, for example by navigating to a blank page, and open the Snake game again in the same browser. Without playing a new run, look at the best score the game shows now. Then start a fresh run and end it quickly at a lower score, for example by steering straight into the wall without eating anything, and look at the best score one more time.",
+      "success": [
+        "The run ended with the score at 2 or more and the game showed a best score matching that final score",
+        "After leaving and reopening the game in the same browser, the same best score was still shown without playing again",
+        "After the later worse run, the best score still showed the higher remembered value rather than dropping to the lower one"
+      ],
+      "path": "/",
+      "timeoutSeconds": 600
+    }
+  ]
+}
