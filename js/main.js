@@ -1,15 +1,19 @@
 // Boot: wire the pure grid engine (js/engine.js) to the page.
 //
-// The page owns three jobs and nothing else: it draws the run's current state
+// The page owns four jobs and nothing else: it draws the run's current state
 // (snake, food) on the canvas, it renders the score readout as exactly "Score N"
-// after every change, and it turns inputs into engine calls through one steer
-// path. The inputs are the keyboard (arrow keys and W/A/S/D, case-insensitive,
+// after every change, it turns inputs into engine calls through one steer
+// path, and it keeps the best readout: the best-score store (js/best-score.js)
+// restores the remembered best at page load and settles the final score at
+// every game over, so the best survives runs and visits. The inputs are the
+// keyboard (arrow keys and W/A/S/D, case-insensitive,
 // unknown keys ignored) and a "snake-steer" document event whose detail carries
 // any accepted input ("up", "ArrowLeft", "a", ...); later input modes (swipes)
 // can dispatch that event instead of knowing the engine. A run ends when the
 // engine says so — the snake hits a wall or bites its own body — and the page
-// then shows the game-over message naming the final score plus a Play again
-// control that starts a fresh run at "Score 0" without reloading the page.
+// then records the final score as a candidate best, shows the game-over
+// message naming that score plus a Play again control that starts a fresh run
+// at "Score 0" without reloading the page.
 //
 // The wiring is dependency-injected for the node:test suites: the timer
 // functions, the run factory and every DOM node are parameters, so tests drive
@@ -19,6 +23,7 @@
 // Math.random so real games scatter their food.
 
 import { createRun } from './engine.js';
+import { createBestStore } from './best-score.js';
 
 export const GRID = 20;
 export const TICK_MS = 150;
@@ -99,10 +104,12 @@ export function wireSteering(doc, steer) {
  * at "Score 0" without reloading the page.
  *
  * options: { canvas, start, score, doc, gameOver, finalScore, playAgain,
- * setInterval = setInterval, clearInterval = clearInterval,
- * makeRun = () => createRun(GRID, GRID, { rng: () => 0 }) } — the nodes and
- * the timer are injectable so tests can drive them; gameOver/finalScore/
- * playAgain/doc may be omitted when the caller only wants the loop.
+ * bestStore = null, setInterval = setInterval, clearInterval = clearInterval,
+ * makeRun = () => createRun(GRID, GRID, { rng: () => 0 }) } — the nodes, the
+ * timer and the best-score store are injectable so tests can drive them;
+ * gameOver/finalScore/playAgain/bestStore/doc may be omitted when the caller
+ * only wants the loop. When a run ends, bestStore.settle(finalScore) keeps the
+ * greatest of the remembered best and this run's score in the best readout.
  */
 export function wireStart({
   canvas,
@@ -112,6 +119,7 @@ export function wireStart({
   gameOver = null,
   finalScore = null,
   playAgain = null,
+  bestStore = null,
   setInterval: every = setInterval,
   clearInterval: stop = clearInterval,
   makeRun = () => createRun(GRID, GRID, { rng: () => 0 }),
@@ -141,6 +149,7 @@ export function wireStart({
   const endRun = () => {
     stopTimer();
     start.disabled = false;
+    if (bestStore) bestStore.settle(run.score); // the best keeps the greatest score
     if (finalScore) finalScore.textContent = String(run.score);
     if (gameOver) gameOver.hidden = false; // the game-over message names the final score
   };
@@ -168,10 +177,25 @@ if (typeof document !== 'undefined') {
   const canvas = document.getElementById('board');
   const start = document.getElementById('start');
   const score = document.getElementById('score');
+  const best = document.getElementById('best');
   const gameOver = document.getElementById('game-over');
   const finalScore = document.getElementById('final-score');
   const playAgain = document.getElementById('play-again');
   if (canvas) drawIdleBoard(canvas);
+  // Page load: the best store reads the remembered best from localStorage and
+  // renders it into the best readout, whatever happens to the run wiring
+  // below. localStorage itself can be blocked (private mode, permissions), so
+  // resolve it defensively: without it the best lives only for this visit.
+  let bestStore = null;
+  if (best) {
+    let storage = null;
+    try {
+      storage = typeof localStorage === 'undefined' ? null : localStorage;
+    } catch {
+      storage = null;
+    }
+    bestStore = createBestStore({ storage, readout: best });
+  }
   if (canvas && start && score) {
     wireStart({
       canvas,
@@ -181,6 +205,7 @@ if (typeof document !== 'undefined') {
       gameOver,
       finalScore,
       playAgain,
+      bestStore,
       makeRun: () => createRun(GRID, GRID, { rng: Math.random }),
     });
   }
