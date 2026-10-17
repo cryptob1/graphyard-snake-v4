@@ -5,17 +5,18 @@ A browser Snake game, built end to end by Graphyard agents.
 It will be published at <https://cryptob1.github.io/graphyard-snake-v4/>, opening
 straight from the link with no install, account or login.
 
-**Status:** the game is playable with a keyboard. Pressing **Start** (or **Play again**)
-launches a run at `Score 0`: the snake moves by itself, one cell per tick, and you
-steer it with the **arrow keys** or **W/A/S/D**. Eating food grows the snake and
-raises the score by one. Hitting a wall or biting its own tail ends the run with
-a game-over message naming the final score and a **Play again** button that
-starts a fresh run without reloading the page. The **best** score is kept
-across runs and visits: when a run ends the best readout shows the greatest
-score reached so far (this run included when it is the new best), it is stored
-in the browser's `localStorage`, and reopening the game later in the same
-browser still shows it — a later worse run never lowers it. Swipes on a phone
-are not playable yet; they arrive with a later plan item.
+**Status:** the game is playable with a keyboard and, on a phone, with swipes.
+Pressing **Start** (or **Play again**) launches a run at `Score 0`: the snake
+moves by itself, one cell per tick, and you steer it with the **arrow keys** or
+**W/A/S/D**, or by **swiping** up, down, left or right across the board on a
+touchscreen — swiping never scrolls the page away from the game. Eating food
+grows the snake and raises the score by one. Hitting a wall or biting its own
+tail ends the run with a game-over message naming the final score and a **Play
+again** button that starts a fresh run without reloading the page. The **best**
+score is kept across runs and visits: when a run ends the best readout shows the
+greatest score reached so far (this run included when it is the new best), it is
+stored in the browser's `localStorage`, and reopening the game later in the same
+browser still shows it — a later worse run never lowers it.
 
 ## What's on the page
 
@@ -25,7 +26,8 @@ are not playable yet; they arrive with a later plan item.
   hidden game-over overlay (final score plus **Play again**) that appears
   when a run ends.
 - `css/style.css` — responsive layout; the board keeps a square aspect and sets
-  `touch-action: none` so swipes on a phone never scroll the page.
+  `touch-action: none` so swipes on a phone never scroll the page, and a
+  phone-width media query keeps the whole game on one screen.
 - `js/engine.js` — the pure grid state machine (movement, steering, food,
   collisions, score) with no DOM.
 - `js/main.js` — ES-module boot that wires the engine to the page: it draws the
@@ -36,6 +38,12 @@ are not playable yet; they arrive with a later plan item.
   remembered best at page load and renders it into the best readout, and on run
   end it keeps and stores the greatest of the remembered best and the final
   score, so a worse run never lowers it.
+- `js/swipe.js` — the phone's steering path: it listens for touch gestures on
+  the board, reads the finished swipe's dominant direction (a small threshold
+  filters taps and jiggles), dispatches the same `snake-steer` document event
+  the keyboard path uses, and calls `preventDefault()` on every `touchmove`
+  over the board (registered non-passive) so a steering swipe never scrolls the
+  page away from the game.
 
 Plain HTML, CSS and JavaScript: no build step and no runtime dependencies.
 
@@ -60,7 +68,10 @@ npm test        # same as: node --test
 the page wiring (live run, keyboard steering, score and growth, game over and
 Play again) on hand-rolled DOM and canvas stubs, `tests/best-score.test.js` the
 remembered best score (the readout at run end, persistence across a simulated
-fresh page load) on a localStorage stub, and `tests/page-shell.test.js`
+fresh page load) on a localStorage stub, `tests/swipe.test.js` swipe steering
+(the dispatching `snake-steer` event per direction, the running snake turning on
+it, taps and diagonals, the prevented `touchmove` that keeps the page from
+scrolling) on synthetic touch records, and `tests/page-shell.test.js`
 checks the page content, serves the repository root over
 plain static HTTP to confirm every referenced asset answers with the right content
 type, and keeps the page plus its assets under a 60 KB budget with no external
