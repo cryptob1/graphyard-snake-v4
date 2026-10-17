@@ -15,12 +15,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "No build step was detected for this repository; replace this line with its build command"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+      # No build step: the game is plain static files. Sanity-check that the page
+      # exists and every JavaScript file parses.
+      - run: test -f index.html && for f in $(git ls-files 'js/*.js' 'tests/*.js'); do node --check "$f"; done
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "No test step was detected for this repository; replace this line with its test command"
+      # Node 26: `node --test DIR` runs every test file under DIR (Node 22 and 24 do not accept a directory).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+      - run: node --test tests/
   graphyard-gate:
     needs: [build, test]
     if: always()
@@ -30,3 +39,27 @@ jobs:
         env:
           BUILD: ${{ needs.build.result }}
           TEST: ${{ needs.test.result }}
+  # On push to main, publish the repository root (index.html, css, js) as-is to
+  # GitHub Pages: no build step, no dependencies installed.
+  deploy:
+    needs: [build, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
