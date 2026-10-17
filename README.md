@@ -91,7 +91,12 @@ environment. The job authenticates with its own `pages: write` and `id-token: wr
 permissions, so it needs no repository secret and pushes no branch.
 
 The deploy needs one repository setting: Settings → Pages → Source is
-"GitHub Actions".
+"GitHub Actions". With that source, Pages serves only what `actions/deploy-pages`
+deploys, so the site keeps showing whatever was last deployed until the deploy job
+first succeeds on `main`. To check a deploy, open the deploy job's run on `main` (its
+`github-pages` environment links the page URL) and load
+<https://cryptob1.github.io/graphyard-snake-v4/>: it should serve this repository's
+`index.html` (the page titled "Snake").
 
 `tests/delivery-workflow.test.js` checks that workflow's test command, the unchanged
 `graphyard-gate` job and that publishing adds no build step;
