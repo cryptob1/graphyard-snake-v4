@@ -1,4 +1,7 @@
 {
+  "capacity": {
+    "workers": 2
+  },
   "documentation": {
     "paths": [
       "README.md",
