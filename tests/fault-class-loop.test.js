@@ -51,6 +51,18 @@
 // live audit now runs the fetch itself, so a scratch whose origin the host cannot fetch fails it
 // outright instead of passing behind an at-or-behind tree check.
 //
+// The second follow-up (GY-32): the audit GY-31 left behind still read the base the scratch
+// fetched at or BEHIND the coordinator checkout's remote-tracking main — an ancestry every old
+// commit satisfies, so a scratch frozen at any old commit passed it, exactly as the finding
+// records. The corrected audit reads the fetched base at or AHEAD of the coordinator's view:
+// behind is the freeze (a stale source serves an old commit the tree checks then resolve
+// against), ahead is the legitimate lag between a landing's push and the checkout ref's update —
+// a window the live host held at review time, which an equality check would fail spuriously.
+// The model test reproduces the finding against the assertions as delivered — a scratch whose
+// fetch works, reading a stale source, passes every one of them, the origin/main == main
+// equality included — then shows the flipped check rejecting that scratch and passing the
+// healthy one, lag included.
+//
 // The file runs under `node --test` (plain JavaScript, Node builtins only, real git in a temporary
 // directory it creates itself) and carries its own fixtures.
 
@@ -170,6 +182,24 @@ function landMerges(installation, count) {
   }
   gitOk(installation.remote, ['fetch', '-q', installation.repository, 'refs/heads/merge-writer:refs/heads/main']);
   gitOk(installation.repository, ['update-ref', 'refs/remotes/origin/main', 'refs/heads/merge-writer']);
+  gitOk(installation.repository, ['checkout', '-q', 'main']);
+  gitOk(installation.repository, ['branch', '-q', '-D', 'merge-writer']);
+}
+
+/**
+ * The window between one landing's push and the coordinator checkout's ref update (the live host
+ * held it at review time: the remote served the newer tip while the checkout still tracked the
+ * older one): a merge pushed to the remote alone, the checkout's remote-tracking main left where
+ * it was. The remote — not the checkout's ref — is what the scratch's fetch re-reads, so a base
+ * read must tolerate sitting ahead of the checkout's view.
+ */
+function landMergeAheadOfCheckout(installation) {
+  gitOk(installation.repository, ['checkout', '-q', '-b', 'merge-writer', 'refs/remotes/origin/main']);
+  mkdirSync(join(installation.repository, 'docs'), { recursive: true });
+  writeFileSync(join(installation.repository, 'docs/merge-ahead.md'), '# merge ahead\n');
+  gitOk(installation.repository, ['add', 'docs/merge-ahead.md']);
+  gitOk(installation.repository, ['commit', '-q', '-m', 'Merge: pushed before the checkout ref adopts it']);
+  gitOk(installation.remote, ['fetch', '-q', installation.repository, 'refs/heads/merge-writer:refs/heads/main']);
   gitOk(installation.repository, ['checkout', '-q', 'main']);
   gitOk(installation.repository, ['branch', '-q', '-D', 'merge-writer']);
 }
@@ -529,6 +559,79 @@ test('unit:post-merge-follow-up-1 the delivered repair never made the fetch it r
   }
 });
 
+test('unit:post-merge-follow-up-2 the audit still passed a scratch frozen at any old commit — at-or-behind accepts every ancestor — so the corrected audit reads the fetched base at or ahead of the coordinator view', () => {
+  const installation = recordedInstallation();
+  try {
+    // The finding, built as a state: GY-31 repaired the scratch's transport, so its fetch works —
+    // and then the source that fetch reaches goes stale. The model is a stand-in remote frozen at
+    // the seed (a clone taken before the merge writer's landings and never advanced), which the
+    // rewrite is later repointed onto: `git fetch --quiet origin main` succeeds and rewinds
+    // origin/main to the old commit, the way any fetchable-but-stale source would.
+    const frozen = join(installation.base, 'frozen-origin.git');
+    gitOk(installation.base, ['init', '-q', '--bare', frozen]);
+    gitOk(frozen, ['fetch', '-q', installation.repository, 'refs/remotes/origin/main:refs/heads/main']);
+    repairScratchCheckout(installation.scratch, installation.repository, installation.unfetchable, installation.remote);
+    landMerges(installation, 3);
+    const tip = gitOk(installation.repository, ['rev-parse', 'refs/remotes/origin/main']).trim();
+    // The healthy moment first: the scratch's fetch re-reads the remote and holds the tip.
+    assert.equal(gitTry(installation.scratch.directory, ['fetch', '--quiet', 'origin', 'main']).status, 0);
+    assert.equal(gitOk(installation.scratch.directory, ['rev-parse', 'refs/remotes/origin/main']).trim(), tip);
+    assert.ok(baseTree(installation.scratch.directory).files.has('docs/merge-2.md'));
+    // The source goes stale: the rewrite now reaches the frozen stand-in, and the next fetch — the
+    // same command, still succeeding — freezes origin/main at the seed, while the objects the
+    // healthy fetch already brought stay in the store (a stale source serves an old commit; it
+    // deletes nothing).
+    gitOk(installation.scratch.directory, ['config', '--unset', `url.${installation.remote}.insteadOf`]);
+    gitOk(installation.scratch.directory, ['config', `url.${frozen}.insteadOf`, installation.unfetchable]);
+    assert.equal(gitTry(installation.scratch.directory, ['fetch', '--quiet', 'origin', 'main']).status, 0, 'the fetch against the stale source still works');
+    const origin = gitOk(installation.scratch.directory, ['rev-parse', 'refs/remotes/origin/main']).trim();
+    const local = gitOk(installation.scratch.directory, ['rev-parse', 'refs/heads/main']).trim();
+    assert.equal(origin, installation.baseTip, 'origin/main is frozen at the seed, not the tip');
+    assert.ok(!baseTree(installation.scratch.directory).files.has('docs/merge-2.md'), 'the scratch reads a tree three merges stale');
+
+    // The audit as GY-31 delivered it, evaluated on that scratch: the fetch works (asserted above),
+    // the frozen base is an ancestor of the coordinator tip, the seeded main is an ancestor of
+    // the base, and the tree resolves (asserted above) — every assertion it made holds on a
+    // scratch reading an old tree, the origin/main == main equality the first audit asserted
+    // included, because a frozen origin never advances past the main it was seeded with. That is
+    // the finding verbatim: a scratch frozen at any old commit passes.
+    assert.equal(origin, local);
+    assert.equal(gitTry(installation.scratch.directory, ['merge-base', '--is-ancestor', origin, tip]).status, 0, 'the delivered at-or-behind check accepts the frozen base');
+    assert.equal(gitTry(installation.scratch.directory, ['merge-base', '--is-ancestor', local, origin]).status, 0, 'the delivered seeded-main check accepts it too');
+
+    // The corrected audit rejects the same scratch on the one line that changed: the base the
+    // scratch fetched sits behind the coordinator view — not at or ahead of it.
+    assert.notEqual(gitTry(installation.scratch.directory, ['merge-base', '--is-ancestor', tip, origin]).status, 0, 'the coordinator tip is not an ancestor of the frozen base');
+
+    // The corrected state: the rewrite reaches the repository's own remote again, and the audit's
+    // own fetch moves the base back to the tip — at-or-ahead holds with equality, the seeded main
+    // stays behind, and the tree the scratch reads is the tree the coordinator reads.
+    gitOk(installation.scratch.directory, ['config', '--unset', `url.${frozen}.insteadOf`]);
+    gitOk(installation.scratch.directory, ['config', `url.${installation.remote}.insteadOf`, installation.unfetchable]);
+    assert.equal(gitTry(installation.scratch.directory, ['fetch', '--quiet', 'origin', 'main']).status, 0);
+    const current = gitOk(installation.scratch.directory, ['rev-parse', 'refs/remotes/origin/main']).trim();
+    assert.equal(current, tip);
+    assert.equal(gitTry(installation.scratch.directory, ['merge-base', '--is-ancestor', tip, current]).status, 0, 'at-or-ahead holds at equality');
+    assert.equal(gitTry(installation.scratch.directory, ['merge-base', '--is-ancestor', local, current]).status, 0, 'the seeded main is behind the base it reads');
+    assert.ok(baseTree(installation.scratch.directory).files.has('docs/merge-2.md'));
+
+    // Why at-or-ahead and not equality: between a landing's push and the coordinator checkout's
+    // ref update the remote serves a tip the checkout does not name yet — the window the live
+    // host held at review time. The model pushes one merge the checkout's ref has not adopted;
+    // the scratch's fetch reads the newer tip, and the corrected audit passes it, where an
+    // equality check would fail a healthy scratch mid-landing.
+    landMergeAheadOfCheckout(installation);
+    assert.equal(gitTry(installation.scratch.directory, ['fetch', '--quiet', 'origin', 'main']).status, 0);
+    const ahead = gitOk(installation.scratch.directory, ['rev-parse', 'refs/remotes/origin/main']).trim();
+    assert.notEqual(ahead, tip, 'the fetched base sits ahead of the checkout view');
+    assert.equal(gitTry(installation.scratch.directory, ['merge-base', '--is-ancestor', tip, ahead]).status, 0, 'at-or-ahead tolerates the lag');
+    assert.equal(gitTry(installation.scratch.directory, ['merge-base', '--is-ancestor', local, ahead]).status, 0);
+    assert.ok(baseTree(installation.scratch.directory).files.has('docs/merge-ahead.md'));
+  } finally {
+    rmSync(installation.base, { recursive: true, force: true });
+  }
+});
+
 // The live installation the recorded rows name, audited only where it exists: on the coordinator
 // host. CI checks out this repository on a GitHub runner, which has no access to that host's files,
 // so the audit skips there (the recorded-state reproduction above still runs).
@@ -544,15 +647,17 @@ test(
     // and fails this line with that error.
     const fetched = gitTry(SCRATCH_ROOT, ['fetch', '--quiet', 'origin', 'main']);
     assert.equal(fetched.status, 0, `the scratch's origin is fetchable on this host: ${fetched.stderr.trim()}`);
-    // The repair this item delivered, corrected: origin/main and main both resolve at the recorded
-    // root, and the tree they name is this repository's base tree — a commit the coordinator
-    // checkout holds, at or behind the tip its remote-tracking main names (the merge writer advances
-    // that tip whenever it lands a merge; the scratch's own fetch re-reads it at every filing, so it
-    // never runs ahead) — with the repair's own `main` an ancestor of that tip, where it seeded it.
+    // The repair this item delivered, corrected twice over: the tree the scratch reads is this
+    // repository's base tree, and the base its fetch just re-read is at or AHEAD of the tip the
+    // coordinator checkout's remote-tracking main names — behind is the freeze the second
+    // follow-up found (at-or-behind accepts any old commit, so a scratch frozen at one passed;
+    // the merge writer advances the remote tip whenever it lands a merge), ahead is the
+    // legitimate lag between a landing's push and that ref's update — with the repair's own
+    // `main` still an ancestor of the base it seeded, which an advancing origin never violates.
     const origin = gitOk(SCRATCH_ROOT, ['rev-parse', 'refs/remotes/origin/main']).trim();
     const local = gitOk(SCRATCH_ROOT, ['rev-parse', 'refs/heads/main']).trim();
     const coordinator = gitOk(COORDINATOR_CHECKOUT, ['rev-parse', 'refs/remotes/origin/main']).trim();
-    gitOk(SCRATCH_ROOT, ['merge-base', '--is-ancestor', origin, coordinator]);
+    gitOk(SCRATCH_ROOT, ['merge-base', '--is-ancestor', coordinator, origin]);
     gitOk(SCRATCH_ROOT, ['merge-base', '--is-ancestor', local, origin]);
     const files = baseTree(SCRATCH_ROOT).files;
     assert.ok(files.size > 1, `the base tree resolves with its files (${files.size})`);
