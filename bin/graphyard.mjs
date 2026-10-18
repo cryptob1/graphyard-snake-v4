@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Reaps coordination sessions whose decisions settled (GY-20).
+// Reaps coordination sessions whose decisions settled (GY-20), and audits the credentials the
+// installation's identities read through (GY-18).
 //
 //   node bin/graphyard.mjs --status [--json] [--grace-ms N]
 //   node bin/graphyard.mjs --reap   [--json] [--grace-ms N]
+//   node bin/graphyard.mjs credentials [--refresh] [--json] [--key GY-N]
 //
 // Three approver sessions on GY-1 stayed state=running and observed=idle for hours
 // after their decisions settled as refused (approver:f9162d74 refused 2026-10-17T03:01:31Z,
@@ -38,9 +40,41 @@
 // close step, keyed on the lease), and never writes anything but pane closes.
 //
 // Run it from the coordinator checkout — the one whose .graphyard/ holds master.json.
+//
+// GY-18 — the credential pass. The doctor/work principal's bearer token went stale: `status GY-N`
+// reads and doctor report posts were refused 401 'A valid Graphyard bearer token is required' for
+// hours while the master's own reads succeeded, because every doctor launch and work filing the
+// loop makes runs as the operator credential (src/daemon/doctor.ts doctorEffects env, doctor.ts
+// postRun), and nothing on the host verified that credential still authenticated. On each pass,
+// against this host's own installation:
+//
+//   1. reads the coordinator's Graphyard config (.graphyard/master.json in the coordinator
+//      checkout — a managed worktree is not one) for the control plane URL and every credential
+//      file it names: the coordinator's own, the operator agent's (the doctor identity), the
+//      approver's and each worker's;
+//   2. probes each one with the exact work read `status GY-N` makes (GET /api/work/:key — the read
+//      the recorded fault refused), plus the ambient session credential the environment names
+//      (GRAPHYARD_TOKEN_FILE / GRAPHYARD_TOKEN), which is the credential a loop-launched doctor
+//      session actually runs as — the one that was stale in the recorded fault while the file the
+//      re-provisioned config named was already fresh;
+//   3. `--refresh` then repairs each stale one before re-reading: a credential whose role has
+//      another file the config names that authenticates takes that file's token (the recorded
+//      remedy — the fresh token the setup wrote beside the stale file); the doctor's operator
+//      credential with no alternate is minted fresh through the control plane's own rotate route
+//      (POST /api/operator-agents/:id/rotate, administrator-gated), authorized by the first
+//      credential of the config's that the plane still accepts; anything else is reported
+//      unrefreshable with the setup step that provisions it. Tokens are never printed;
+//   4. both modes exit 1 while any credential still refuses its work read, so a supervisor reading
+//      the exit code sees the invariant the fault class counts, and a refresh that rewrote a file
+//      reports the restart a running master loop still needs: it keeps the settings it loaded when
+//      .graphyard/master.json changes credentialFile or cliPath (src/master/config.ts
+//      masterBoundSettings — 'restart master run to adopt it').
+//
+// The pass never ends leases, never touches Herdr, and writes nothing but credential files it has
+// just verified stale, with tokens it has just verified accepted.
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -211,7 +245,204 @@ export function closePane(binary, pane, configHome) {
   }
 }
 
+// GY-18 — the credential pass, as the header above describes it.
+
+/** The item a credential probe reads by default: the recorded fault's own `status GY-1`. */
+export const defaultProbeKey = 'GY-1';
+/** A credential is healthy when the plane accepted it for a read — the item itself need not exist. */
+export const passingRead = (disposition) => disposition === 'ok' || disposition === 'authenticated';
+
+/** The command line the credential pass takes, parsed from its own argv (after the `credentials` word). */
+export function parseCredentialArguments(argv) {
+  const options = { refresh: false, json: false, key: null };
+  for (let index = 0; index < argv.length; index++) {
+    const argument = argv[index];
+    const value = () => { const next = argv[++index]; if (next === undefined) throw new Error(`${argument} needs a value`); return next; };
+    if (argument === '--refresh') options.refresh = true;
+    else if (argument === '--json') options.json = true;
+    else if (argument === '--key') {
+      options.key = value();
+      if (!/^GY-\d+$/.test(options.key)) throw new Error(`--key takes a work key like GY-1, not ${JSON.stringify(options.key)}`);
+    } else throw new Error(`Unknown argument ${argument}`);
+  }
+  return options;
+}
+
+/** Every identity whose absolute credential file .graphyard/master.json names (src/master/config.ts MasterConfig): the coordinator's own, the operator agent's (the doctor), the approver's and each worker's. */
+export function installationIdentities(master) {
+  const identities = [];
+  const named = (entry) => entry && isAbsolute(String(entry.credentialFile ?? '')) ? { path: entry.credentialFile } : null;
+  const coordinator = named(master);
+  if (coordinator) identities.push({ role: 'coordinator', name: null, ...coordinator });
+  const doctor = named(master?.operatorAgent);
+  if (doctor) identities.push({ role: 'doctor', name: master.operatorAgent.id ?? null, ...doctor });
+  const approver = named(master?.approver);
+  if (approver) identities.push({ role: 'approver', name: master.approver.id ?? null, ...approver });
+  for (const worker of Array.isArray(master?.workers) ? master.workers : []) {
+    const credential = named(worker);
+    if (credential) identities.push({ role: 'worker', name: worker.name ?? null, ...credential });
+  }
+  return identities;
+}
+
+/** The ambient session credential the environment names: the file a loop-launched session runs as (GRAPHYARD_TOKEN_FILE, never the token itself), else an inline token (GRAPHYARD_TOKEN). */
+export function ambientCredential(env = process.env) {
+  const file = typeof env.GRAPHYARD_TOKEN_FILE === 'string' ? env.GRAPHYARD_TOKEN_FILE.trim() : '';
+  if (file && isAbsolute(file)) return { source: 'GRAPHYARD_TOKEN_FILE', path: file };
+  if (typeof env.GRAPHYARD_TOKEN === 'string' && env.GRAPHYARD_TOKEN.trim()) return { source: 'GRAPHYARD_TOKEN', path: null };
+  return null;
+}
+
+/** Judge one work read the way the fault class counts it: server/auth.ts's 401 is the recorded refusal; a 404 still proves the reader authenticated. */
+export function classifyWorkRead(status, body, key) {
+  const error = body && typeof body === 'object' && typeof body.error === 'string' ? body.error : null;
+  if (status === 200) return { disposition: 'ok', item: body && typeof body === 'object' && typeof body.key === 'string' ? body.key : null, detail: body?.key === key ? `the work read returned ${key}` : 'the work read was accepted' };
+  if (status === 404) return { disposition: 'authenticated', item: null, detail: 'the plane answered for an authenticated reader; it holds no such item' };
+  if (status === 401) return { disposition: 'stale', item: null, detail: error ?? 'A valid Graphyard bearer token is required' };
+  if (status === 403) return { disposition: 'refused', item: null, detail: error ?? 'the work read was refused (403)' };
+  return { disposition: 'error', item: null, detail: error ?? `the work read failed (${status})` };
+}
+
+/** One control-plane read with a credential: GET /api/work/:key, the exact read `status GY-N` makes. */
+async function planeRead(url, key, token) {
+  const response = await fetch(`${url.replace(/\/$/, '')}/api/work/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) });
+  return { status: response.status, body: await response.json().catch(() => null) };
+}
+
+/** One control-plane write with a credential, answering status and body the same way. */
+async function planeSend(url, path, token, body) {
+  const response = await fetch(`${url.replace(/\/$/, '')}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  return { status: response.status, body: await response.json().catch(() => null) };
+}
+
+/** Probe one identity's credential with the work read. The token itself is read and sent, never printed. */
+export async function probeCredential({ url, key, role, name, path, token }) {
+  const identity = { role, name: name ?? null, path: path ?? null, source: path ? 'file' : 'environment' };
+  let bearer = typeof token === 'string' ? token : null;
+  if (path) {
+    try { bearer = readFileSync(path, 'utf8').trim(); } catch { return { ...identity, disposition: 'missing', status: null, item: null, detail: 'the credential file does not exist' }; }
+  }
+  if (!bearer) return { ...identity, disposition: 'missing', status: null, item: null, detail: path ? 'the credential file is empty' : 'the environment names no token' };
+  try {
+    const { status, body } = await planeRead(url, key, bearer);
+    return { ...identity, status, ...classifyWorkRead(status, body, key) };
+  } catch (error) {
+    return { ...identity, disposition: 'error', status: null, item: null, detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** A fresh credential token: the shape the plane's own setup and rotate schemas take (a string of at least 32 characters). */
+export const mintToken = () => randomBytes(32).toString('base64url');
+
+/** Write one credential file the way the installation's own setup does: atomically, owner-only. */
+export function writeCredential(path, token) {
+  const scratch = `${path}.refresh-${process.pid}`;
+  writeFileSync(scratch, `${token}\n`, { mode: 0o600 });
+  renameSync(scratch, path);
+  chmodSync(path, 0o600);
+}
+
+/**
+ * The refresh one stale credential gets, decided before anything is written:
+ *   `copy`   — another file the config names for the same role authenticates: its token is the fresh
+ *              credential, and the stale file is rewritten with it. That is the recorded fault's own
+ *              remedy — the re-provisioned setup had written the fresh token beside the stale file,
+ *              and the loop's loaded settings still named the old path. The ambient session
+ *              credential is the doctor's by construction (the loop launches doctor sessions with the
+ *              operator credential's file), so it copies from the doctor's passing file, else the
+ *              coordinator's;
+ *   `rotate` — the doctor's own file with no authenticating alternate: the control plane's rotate
+ *              route mints a fresh credential (POST /api/operator-agents/:id/rotate);
+ *   `none`   — no route this command holds can mint it: the installation's setup provisions it.
+ */
+export function planCredentialRefresh(finding, findings, master) {
+  if (passingRead(finding.disposition)) return { action: 'none', reason: 'the credential authenticates' };
+  const donor = (role) => findings.find(other => other.role === role && other.path && other.path !== finding.path && passingRead(other.disposition)) ?? null;
+  if (finding.role === 'ambient') {
+    const from = donor('doctor') ?? donor('coordinator');
+    if (from) return { action: 'copy', from: from.path, reason: `the ${from.role} credential the config names authenticates; its token refreshes the ambient session credential's file, and the master run restart adopts the changed settings` };
+    return { action: 'none', reason: 'no credential the config names can refresh the ambient session credential; refresh it in the file the launching session names and restart the master run to adopt the changed settings' };
+  }
+  const sameRole = donor(finding.role);
+  if (sameRole) return { action: 'copy', from: sameRole.path, reason: `the ${finding.role} credential the config names at another path authenticates; its token refreshes this file` };
+  if (finding.role === 'doctor' && typeof master?.operatorAgent?.id === 'string' && master.operatorAgent.id) {
+    return { action: 'rotate', id: master.operatorAgent.id, reason: 'no alternate file authenticates; the control plane\'s rotate route mints a fresh credential for the doctor principal' };
+  }
+  return { action: 'none', reason: 'no control-plane route this command holds mints this credential; the installation\'s setup provisions it' };
+}
+
+/** What a refresh pass did to one credential, and what it could not do. */
+export async function refreshOne({ url, key, finding, findings, master }) {
+  const plan = planCredentialRefresh(finding, findings, master);
+  if (plan.action === 'copy') {
+    writeCredential(finding.path, readFileSync(plan.from, 'utf8').trim());
+    const again = await probeCredential({ url, key, role: finding.role, name: finding.name, path: finding.path });
+    Object.assign(finding, again);
+    return { outcome: 'refreshed', role: finding.role, path: finding.path, from: plan.from, disposition: again.disposition, reason: plan.reason };
+  }
+  if (plan.action === 'rotate') {
+    for (const other of findings.filter(candidate => candidate !== finding && candidate.path && candidate.path !== finding.path && passingRead(candidate.disposition))) {
+      const minted = mintToken();
+      const { status, body } = await planeSend(url, `/api/operator-agents/${encodeURIComponent(plan.id)}/rotate`, readFileSync(other.path, 'utf8').trim(), { token: minted, transitionSeconds: 0, reason: 'GY-18 credential pass: the doctor credential no longer authenticates' })
+        .catch(error => ({ status: 0, body: { error: error instanceof Error ? error.message : String(error) } }));
+      if (status === 200) {
+        writeCredential(finding.path, minted);
+        const again = await probeCredential({ url, key, role: finding.role, name: finding.name, path: finding.path });
+        Object.assign(finding, again);
+        return { outcome: 'refreshed', role: finding.role, path: finding.path, with: `${other.role}${other.name ? ` (${other.name})` : ''}`, disposition: again.disposition, reason: plan.reason };
+      }
+      if (status !== 403) return { outcome: 'refused', role: finding.role, path: finding.path, reason: `the rotate route answered ${status}: ${body?.error ?? 'no detail'}` };
+      // 403: this credential may not rotate the principal; the next authorized one tries.
+    }
+    return { outcome: 'refused', role: finding.role, path: finding.path, reason: 'no credential the config names may rotate the doctor principal (the route is administrator-gated)' };
+  }
+  return { outcome: 'unrefreshable', role: finding.role, path: finding.path ?? null, reason: plan.reason };
+}
+
+/** The credential pass itself: probe every identity and the ambient session credential, optionally refresh, and report. */
+export async function credentialMain(arguments_, env = process.env, log = console.log) {
+  const options = parseCredentialArguments(arguments_);
+  const key = options.key ?? defaultProbeKey;
+  const root = coordinatorRoot(dirname(fileURLToPath(import.meta.url)));
+  const master = JSON.parse(readFileSync(resolve(root, '.graphyard', 'master.json'), 'utf8'));
+  const url = master.url;
+  if (typeof url !== 'string' || !/^https?:\/\//.test(url)) throw new Error('.graphyard/master.json names no control plane URL');
+  const identities = installationIdentities(master);
+  if (!identities.length) throw new Error('.graphyard/master.json names no absolute credential file');
+  const ambient = ambientCredential(env);
+  const findings = [];
+  for (const identity of identities) findings.push(await probeCredential({ url, key, ...identity }));
+  if (ambient) findings.push(await probeCredential({ url, key, role: 'ambient', name: ambient.source, path: ambient.path, token: ambient.path ? undefined : env.GRAPHYARD_TOKEN.trim() }));
+  const repairs = [];
+  if (options.refresh) for (const finding of findings) {
+    if (passingRead(finding.disposition)) continue;
+    repairs.push(await refreshOne({ url, key, finding, findings, master }));
+  }
+  const refreshed = repairs.filter(repair => repair.outcome === 'refreshed');
+  const unrefreshable = repairs.filter(repair => repair.outcome !== 'refreshed').map(({ outcome, ...repair }) => ({ ...repair, refused: outcome === 'refused' }));
+  const unhealthy = findings.filter(finding => !passingRead(finding.disposition));
+  const report = {
+    repository: master.repository, mode: options.refresh ? 'credentials-refresh' : 'credentials', key,
+    identities: findings.length, findings, refreshed, unrefreshable, stale: unhealthy.length,
+    adoption: repairs.length ? 'a running master loop keeps the settings it loaded when .graphyard/master.json changes credentialFile or cliPath, which it is bound to; restart the master run to adopt them' : null,
+  };
+  if (options.json) log(JSON.stringify(report, null, 2));
+  else {
+    log(`repository: ${master.repository} (work read ${key})`);
+    for (const finding of findings) {
+      log(`  ${finding.disposition.padEnd(14)} ${(finding.role + (finding.name ? ` (${finding.name})` : '')).padEnd(34)} ${finding.path ?? 'environment'}  ${finding.detail}`);
+    }
+    for (const repair of refreshed) log(`  refreshed ${repair.role} ${repair.path}${repair.from ? ` from ${repair.from}` : repair.with ? ` through the rotate route with the ${repair.with} credential` : ''}`);
+    for (const repair of unrefreshable) log(`  ${repair.refused ? 'refused' : 'unrefreshable'} ${repair.role} ${repair.path ?? ''} — ${repair.reason}`);
+    log(unhealthy.length
+      ? `${unhealthy.length} credential(s) still refuse their work read; ${report.adoption}`
+      : `every identity's work read was accepted; no credential is stale`);
+  }
+  return unhealthy.length ? 1 : 0;
+}
+
 async function main() {
+  if (process.argv[2] === 'credentials') return credentialMain(process.argv.slice(3));
   const options = parseArguments(process.argv.slice(2));
   const root = coordinatorRoot(dirname(fileURLToPath(import.meta.url)));
   const master = JSON.parse(readFileSync(resolve(root, '.graphyard', 'master.json'), 'utf8'));
