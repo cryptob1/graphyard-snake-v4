@@ -37,6 +37,20 @@
 // with its recorded sentence, and the same filing, retried after the repair, lands end to end. The
 // final test audits the live installation on the coordinator host (CI has no access to it and skips).
 //
+// The follow-up the post-merge review filed (GY-31): the remedy above, as it ran on the coordinator
+// host, left the scratch's `origin` naming the repository's SSH remote — a remote that host cannot
+// fetch, ssh dying on /etc/ssh/ssh_config.d (bad file ownership) before it ever authenticates — so
+// the best-effort `git fetch --quiet origin main` every filing runs first failed silently and
+// `origin/main` froze at the seeded commit, three merges behind the coordinator checkout's
+// remote-tracking main. The corrected remedy repairs the transport inside the scratch's own config,
+// changing neither the command baseTree runs nor the remote `origin` names: on the coordinator host
+// `core.sshCommand ssh -F ~/.ssh/config` (the user config authenticates GitHub and never reads the
+// broken system include), which the model below stands in for as a repo-local URL rewrite to a
+// fetchable stand-in. The model test shows the delivered state freezing exactly as recorded — the
+// same filing refusing against the frozen tree — and landing once the transport is repaired; the
+// live audit now runs the fetch itself, so a scratch whose origin the host cannot fetch fails it
+// outright instead of passing behind an at-or-behind tree check.
+//
 // The file runs under `node --test` (plain JavaScript, Node builtins only, real git in a temporary
 // directory it creates itself) and carries its own fixtures.
 
@@ -107,19 +121,57 @@ function openResearchScratch(source, scratch, release, log) {
 }
 
 /**
- * The remedy this item delivers, as the command sequence the change ran on the coordinator host:
- * the scratch session directory becomes a repository of its own reading the base tree — `origin` is
- * this repository's remote (a local stand-in for it in the fixture), `origin/main` is seeded from
- * the coordinator checkout's remote-tracking main so the ref resolves even before the first fetch
- * succeeds, and `main` and the working tree hold the same tree for the session the loop launches
- * there. Every later `git fetch --quiet origin main` (baseTree's own first step) re-reads the remote.
+ * The remedy GY-17 delivered, as the command sequence that ran on the coordinator host: the scratch
+ * session directory becomes a repository of its own reading the base tree — `origin` is this
+ * repository's remote (the fixture's stand-in for it is a URL this host cannot fetch, as the SSH
+ * remote could not be fetched), `origin/main` is seeded from the coordinator checkout's
+ * remote-tracking main so the ref resolves even before the first fetch succeeds, and `main` and the
+ * working tree hold the same tree for the session the loop launches there. What it never did: make
+ * `git fetch --quiet origin main` — the exact command every filing runs first — work on the host it
+ * repaired, so origin/main could not advance past the seed (the freeze GY-31 records).
  */
-function repairScratchCheckout(scratch, repository, remote) {
+function repairScratchCheckoutAsDelivered(scratch, repository, remote) {
   gitOk(scratch.directory, ['init', '-b', 'main']);
   gitOk(scratch.directory, ['remote', 'add', 'origin', remote]);
   gitOk(scratch.directory, ['fetch', '--quiet', repository, 'refs/remotes/origin/main:refs/remotes/origin/main']);
   gitOk(scratch.directory, ['update-ref', 'refs/heads/main', 'refs/remotes/origin/main']);
   gitOk(scratch.directory, ['reset', '--hard', 'main']);
+}
+
+/**
+ * The corrected remedy (GY-31): everything the delivered repair did, plus the transport it left
+ * broken — repo-local config that makes the very command baseTree runs (`git fetch --quiet origin
+ * main`, best-effort and therefore silently skipped whenever it fails) reach a remote the host can
+ * fetch. `origin` still names the repository's remote exactly as before; only the transport to it is
+ * repaired, in the scratch's own config. On the coordinator host that is `core.sshCommand ssh -F
+ * ~/.ssh/config` — under the system config ssh dies reading /etc/ssh/ssh_config.d, and the user
+ * config alone authenticates GitHub — modeled here as a URL rewrite onto the fetchable stand-in.
+ * Every later fetch re-reads the remote, so origin/main tracks the tip the merge writer advances
+ * instead of freezing at the seed.
+ */
+function repairScratchCheckout(scratch, repository, remote, fetchable) {
+  repairScratchCheckoutAsDelivered(scratch, repository, remote);
+  gitOk(scratch.directory, ['config', `url.${fetchable}.insteadOf`, remote]);
+}
+
+/**
+ * The merge writer's next landings (the push behind every `refs/remotes/origin/main` reflog row the
+ * coordinator checkout holds): each merge advances the remote's main and, with it, the coordinator
+ * checkout's remote-tracking main — and only those; the coordinator's local main stays where the
+ * clone left it.
+ */
+function landMerges(installation, count) {
+  gitOk(installation.repository, ['checkout', '-q', '-b', 'merge-writer']);
+  for (let n = 1; n <= count; n += 1) {
+    mkdirSync(join(installation.repository, 'docs'), { recursive: true });
+    writeFileSync(join(installation.repository, `docs/merge-${n}.md`), `# merge ${n}\n`);
+    gitOk(installation.repository, ['add', `docs/merge-${n}.md`]);
+    gitOk(installation.repository, ['commit', '-q', '-m', `Merge ${n}: the merge writer advances the base`]);
+  }
+  gitOk(installation.remote, ['fetch', '-q', installation.repository, 'refs/heads/merge-writer:refs/heads/main']);
+  gitOk(installation.repository, ['update-ref', 'refs/remotes/origin/main', 'refs/heads/merge-writer']);
+  gitOk(installation.repository, ['checkout', '-q', 'main']);
+  gitOk(installation.repository, ['branch', '-q', '-D', 'merge-writer']);
 }
 
 /** The fault catalogue's one class for the kind the recorded rows carry (src/model/fault-classes.ts: 'fix-item' is listed under 'proof'). */
@@ -234,6 +286,10 @@ function recordedInstallation() {
   const remote = join(base, 'origin.git');
   gitOk(base, ['init', '-q', '--bare', remote]);
   gitOk(remote, ['fetch', '-q', repository, `refs/remotes/origin/main:refs/heads/main`]);
+  // The unfetchable stand-in for the SSH remote the coordinator host cannot reach (ssh dies reading
+  // /etc/ssh/ssh_config.d before it authenticates): a path under the fixture that is never created, so
+  // `git fetch origin main` against it fails exactly as the live fetch did — offline and instantly.
+  const unfetchable = join(base, 'ssh-remotes', 'graphyard-snake-v4.git');
   // The Graphyard CLI checkout: a repository of its own, whose commit is the loop's release — a commit this repository does not hold.
   const cli = join(base, 'graphyard-cli');
   gitOk(base, ['init', '-q', '-b', 'main', cli]);
@@ -252,7 +308,7 @@ function recordedInstallation() {
   // the state the coordinator host held, which turns every read of it into "not a valid repository".
   const gitdir = readFileSync(join(worktree, '.git'), 'utf8').trim().slice('gitdir: '.length);
   rmSync(join(repository, '.git', 'worktrees', basename(gitdir)), { recursive: true, force: true });
-  return { base, repository, remote, cli, release, scratch: { directory, worktree }, startFresh, baseTip };
+  return { base, repository, remote, unfetchable, cli, release, scratch: { directory, worktree }, startFresh, baseTip };
 }
 
 /** The diagnostician the loop wires for a subject (src/daemon/diagnosis.ts diagnosticianEffects): its cwd is the scratch the loop placed it in; no `tree` effect, so the filing reads that cwd exactly as `master create` does (diagnosis-fix.ts filingTree). */
@@ -301,8 +357,9 @@ test(`instance ${RECORDED[0].at} fix-item on ${RECORDED[0].work}: the scratch th
     assert.equal(loop.state.faults.instances[0].text, entry.detail);
     assert.equal(loop.state.faults.instances[0].linkedTo, 'GY-4');
 
-    // The candidate condition: the repair the item delivers, then the same filing retried — it lands end to end.
-    repairScratchCheckout(installation.scratch, installation.repository, installation.remote);
+    // The candidate condition: the repair the item delivers — readable seed and a fetch that works
+    // — then the same filing retried: it lands end to end.
+    repairScratchCheckout(installation.scratch, installation.repository, installation.unfetchable, installation.remote);
     const repaired = baseTree(installation.scratch.directory);
     assert.equal(repaired.ref, 'origin/main');
     assert.equal(repaired.files.size, 8);
@@ -342,8 +399,8 @@ test(`instance ${RECORDED[1].at} fix-item on ${RECORDED[1].work}: the refusal re
     assert.equal(loop.state.faults.instances[0].lastSeenAt, subject.diagnosis.fixAt);
     assert.equal(loop.state.actions[`diagnosis:${subject.subject}`].attempts, 2);
 
-    // The candidate condition: once the scratch reads main, the next retry lands and the run ends.
-    repairScratchCheckout(installation.scratch, installation.repository, installation.remote);
+    // The candidate condition: once the scratch reads main — the fetch included — the next retry lands and the run ends.
+    repairScratchCheckout(installation.scratch, installation.repository, installation.unfetchable, installation.remote);
     const landed = loop.fileFixItem(diagnosticianOn(cwd), entry, subject.diagnosis, 17993);
     assert.ok(landed);
     assert.equal(loop.state.actions[`diagnosis:${subject.subject}`].state, 'done');
@@ -379,8 +436,8 @@ test(`instance ${RECORDED[2].at} fix-item on ${RECORDED[2].work}: the third subj
     // Nothing in the filing path repairs the scratch it reads — the refusal is identical on every subject and every cycle, which is why the class recurred for 48 minutes.
     assert.throws(() => baseTree(installation.scratch.directory), error => error.message.startsWith(REFUSAL) && error.message.endsWith(installation.scratch.directory));
 
-    // The candidate condition repairs the scratch once and every pending filing lands.
-    repairScratchCheckout(installation.scratch, installation.repository, installation.remote);
+    // The candidate condition repairs the scratch once — transport included — and every pending filing lands.
+    repairScratchCheckout(installation.scratch, installation.repository, installation.unfetchable, installation.remote);
     const landed = entries.map((entry, index) => loop.fileFixItem(diagnosticianOn(cwd), entry, subjects[index].diagnosis, 17990));
     assert.deepEqual(landed.map(key => typeof key), ['string', 'string', 'string']);
     assert.deepEqual(landed.map(key => loop.state.filed.get(key).plannedFiles), [['tests/snake.test.mjs'], ['js/main.js'], ['css/style.css']]);
@@ -406,7 +463,7 @@ test('the shared cause: the loop never creates the readable tree its own filing 
 
     // The candidate condition — the scratch reads the base tree the way `master create` reads the
     // coordinator checkout: the same fetch, then the same ls-tree, resolving the same files.
-    repairScratchCheckout(installation.scratch, installation.repository, installation.remote);
+    repairScratchCheckout(installation.scratch, installation.repository, installation.unfetchable, installation.remote);
     const atScratch = baseTree(installation.scratch.directory);
     gitOk(installation.repository, ['fetch', '-q', installation.remote, 'refs/heads/main:refs/remotes/origin/main']);
     const atCoordinator = baseTree(installation.repository);
@@ -417,22 +474,86 @@ test('the shared cause: the loop never creates the readable tree its own filing 
   }
 });
 
+test('unit:post-merge-follow-up-1 the delivered repair never made the fetch it relies on work — origin/main freezes at the seed while the merge writer advances, and the transport repair re-reads the remote', () => {
+  const installation = recordedInstallation();
+  try {
+    // The state the delivered remedy left on the coordinator host: a readable seed, an `origin` the
+    // host cannot fetch. The first filing after it reads the seed and succeeds against the tree as
+    // it stood at repair time — the delivered remedy did fix the recorded refusal.
+    repairScratchCheckoutAsDelivered(installation.scratch, installation.repository, installation.unfetchable);
+    const seeded = baseTree(installation.scratch.directory);
+    assert.equal(seeded.ref, 'origin/main');
+    assert.equal(gitOk(installation.scratch.directory, ['rev-parse', 'refs/remotes/origin/main']).trim(), installation.baseTip);
+
+    // Then the merge writer lands three merges, as it did between the delivery and the review.
+    landMerges(installation, 3);
+    const tip = gitOk(installation.repository, ['rev-parse', 'refs/remotes/origin/main']).trim();
+    const atCoordinator = baseTree(installation.repository);
+    assert.ok(atCoordinator.files.has('docs/merge-2.md'), 'the coordinator reads the landed merges');
+
+    // The freeze the review found: the fetch baseTree runs first is best-effort and fails against
+    // the unfetchable remote without a word, so the ref it then reads is still the seed — the tree
+    // three merges stale — and a fix item planning a file those merges added refuses exactly as a
+    // fresh filing would on the live host.
+    const frozenFetch = gitTry(installation.scratch.directory, ['fetch', '--quiet', 'origin', 'main']);
+    assert.notEqual(frozenFetch.status, 0, 'the fetch the delivered repair relies on still fails');
+    const frozen = baseTree(installation.scratch.directory);
+    assert.equal(frozen.ref, 'origin/main');
+    assert.equal(gitOk(installation.scratch.directory, ['rev-parse', 'refs/remotes/origin/main']).trim(), installation.baseTip);
+    assert.ok(!frozen.files.has('docs/merge-2.md'), 'origin/main is frozen at the seed, not the tip');
+
+    const loop = makeLoop();
+    const subject = diagnosisOf('GY-11', '2026-10-17T21:31:07.000Z', ['docs/merge-2.md']);
+    const entry = { subject: subject.subject, kind: 'recurring', work: subject.work, state: 'diagnosed', diagnosis: subject.diagnosis, fix: null, detail: '', updatedAt: subject.diagnosis.fixAt };
+    loop.state.diagnoses[subject.subject] = entry;
+    assert.equal(loop.fileFixItem(diagnosticianOn(installation.scratch.directory), entry, subject.diagnosis, 18001), null);
+    assert.equal(entry.state, 'failed');
+    assert.equal(entry.detail, `The diagnostician's fix item for GY-11 fails the checks master create applies: plannedFiles cannot be resolved: docs/merge-2.md is not in the base tree origin/main`);
+
+    // The corrected remedy: repo-local transport config — `origin` still names the remote it always
+    // named, only the path to it is repaired — and the very next cycle's fetch, the same command,
+    // re-reads the remote: the ref moves to the tip, the tree matches what the coordinator reads,
+    // and the same filing lands against it.
+    gitOk(installation.scratch.directory, ['config', `url.${installation.remote}.insteadOf`, installation.unfetchable]);
+    assert.equal(gitTry(installation.scratch.directory, ['fetch', '--quiet', 'origin', 'main']).status, 0, 'the transport repair makes the fetch work');
+    assert.equal(gitOk(installation.scratch.directory, ['rev-parse', 'refs/remotes/origin/main']).trim(), tip);
+    const reloaded = baseTree(installation.scratch.directory);
+    assert.ok(reloaded.files.has('docs/merge-2.md'));
+    assert.deepEqual([...reloaded.files].sort(), [...atCoordinator.files].sort());
+    const landed = loop.fileFixItem(diagnosticianOn(installation.scratch.directory), entry, subject.diagnosis, 18003);
+    assert.ok(landed, 'the fix item files against the current tree');
+    assert.deepEqual(loop.state.filed.get(landed).plannedFiles, ['docs/merge-2.md']);
+    assert.equal(loop.state.actions[`diagnosis:${subject.subject}`].state, 'done');
+  } finally {
+    rmSync(installation.base, { recursive: true, force: true });
+  }
+});
+
 // The live installation the recorded rows name, audited only where it exists: on the coordinator
 // host. CI checks out this repository on a GitHub runner, which has no access to that host's files,
 // so the audit skips there (the recorded-state reproduction above still runs).
 test(
-  'live audit on the coordinator host: the loop scratch worktree reads the base tree',
+  'live audit on the coordinator host: the loop scratch worktree reads the base tree, by a fetch that works',
   { skip: !existsSync(SCRATCH_ROOT) && `not on the coordinator host: ${SCRATCH_ROOT} is absent` },
   () => {
-    // The repair this item delivered: origin/main and main both resolve at the recorded root, and the
-    // tree they name is this repository's base tree — a commit the coordinator checkout holds, at or
-    // behind the tip its remote-tracking main names (the merge writer advances that tip whenever it
-    // lands a merge; the scratch's own fetch re-reads it at every filing, so it never runs ahead).
+    // The regression the follow-up covers: every filing reads the base tree by first running
+    // `git fetch --quiet origin main` — best-effort, silently skipped when it fails — so a scratch
+    // whose `origin` the host cannot fetch passes every at-or-behind tree check while its
+    // `origin/main` freezes at the seed. The audit therefore runs that fetch itself and requires it
+    // to succeed; on the broken state ssh dies reading /etc/ssh/ssh_config.d before it authenticates
+    // and fails this line with that error.
+    const fetched = gitTry(SCRATCH_ROOT, ['fetch', '--quiet', 'origin', 'main']);
+    assert.equal(fetched.status, 0, `the scratch's origin is fetchable on this host: ${fetched.stderr.trim()}`);
+    // The repair this item delivered, corrected: origin/main and main both resolve at the recorded
+    // root, and the tree they name is this repository's base tree — a commit the coordinator
+    // checkout holds, at or behind the tip its remote-tracking main names (the merge writer advances
+    // that tip whenever it lands a merge; the scratch's own fetch re-reads it at every filing, so it
+    // never runs ahead) — with the repair's own `main` an ancestor of that tip, where it seeded it.
     const origin = gitOk(SCRATCH_ROOT, ['rev-parse', 'refs/remotes/origin/main']).trim();
     const local = gitOk(SCRATCH_ROOT, ['rev-parse', 'refs/heads/main']).trim();
-    assert.equal(origin, local);
     const coordinator = gitOk(COORDINATOR_CHECKOUT, ['rev-parse', 'refs/remotes/origin/main']).trim();
-    gitOk(COORDINATOR_CHECKOUT, ['merge-base', '--is-ancestor', origin, coordinator]);
+    gitOk(SCRATCH_ROOT, ['merge-base', '--is-ancestor', origin, coordinator]);
+    gitOk(SCRATCH_ROOT, ['merge-base', '--is-ancestor', local, origin]);
     const files = baseTree(SCRATCH_ROOT).files;
     assert.ok(files.size > 1, `the base tree resolves with its files (${files.size})`);
     assert.ok([...files].some(path => path.startsWith('tests/')), 'the tree lists the tests directory plannedFiles resolve against');
