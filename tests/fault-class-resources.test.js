@@ -81,6 +81,72 @@
 // what the pass cannot remove, and that no host tmp entry the pass would adopt (this user's,
 // test-temp-named, past the 2 h bound) holds another uid's tree — so the class's precondition
 // failing there fails this test first.
+//
+// GY-42 — the class's second recorded occurrence, one day later (2026-10-18): the identical
+// mechanism through the other uid a containerized run's writes can show as. GY-23's remedy was
+// live and one-off, and its candidate condition — the run that creates the tree removes it while
+// it still holds the creating privilege — was never delivered on the product side, so the next
+// containerized goal-compose-preview run (2026-10-17 20:02–20:07 -0700, session scratch root
+// /tmp/gy-tBSJ6Su) ended at 20:07:05 without removing its tree and re-armed the class. The three
+// recorded instances, one per cycle ~21 s apart, with the same EACCES refusal and, this time, the
+// cycles' own context around it (what each cycle also reaped and freed, verbatim from the loop's
+// resource-reclaims.json):
+//
+//   2026-10-18T05:07:42.973Z  action:reclaim  reclaim:resources:2026-10-18T05:07:42.973Z
+//     "Resource reclaim: freed 2 MB from 51 stale /tmp entries; 1 could not be reclaimed: Tmp
+//     reclaim: /tmp/gy-tBSJ6Su: EACCES: permission denied, rmdir '/tmp/gy-tBSJ6Su/graphyard-goal-
+//     compose-preview-16DNmk/worktrees'"
+//   2026-10-18T05:08:04.488Z  action:reclaim  reclaim:resources:2026-10-18T05:08:04.488Z
+//     "Resource reclaim: reaped 1 review and 0 producer ledger record(s); 1 could not be
+//     reclaimed: Tmp reclaim: /tmp/gy-tBSJ6Su: EACCES: permission denied, rmdir '/tmp/gy-tBSJ6Su/
+//     graphyard-goal-compose-preview-16DNmk/worktrees'"
+//   2026-10-18T05:08:25.241Z  action:reclaim  reclaim:resources:2026-10-18T05:08:25.241Z
+//     "Resource reclaim: reaped 1 review and 0 producer ledger record(s); freed 1 MB from 1 stale
+//     /tmp entry; 1 could not be reclaimed: Tmp reclaim: /tmp/gy-tBSJ6Su: EACCES: permission
+//     denied, rmdir '/tmp/gy-tBSJ6Su/graphyard-goal-compose-preview-16DNmk/worktrees'"
+//
+// The recorded base state, as the item recorded it — its stat and journal name the creating uid 0;
+// the host's own stat of the standing tree presented the interior as 65534:65534 `nobody`, the
+// unmapped host-side view of a tree a containerized uid-0 run created and the same presentation
+// GY-23's tree had. The pass refuses any uid that is not the host user's, so the recorded model
+// below uses the recorded uid 0 and the live audits check uid, not which foreign uid it is:
+//
+//   /tmp/gy-tBSJ6Su                                              drwx-----T vish:vish   (uid 1000, mode 1700)
+//   └─ graphyard-goal-compose-preview-16DNmk                     drwxr-xr-x 0:0      (uid 0, mode 755)
+//      └─ worktrees                                              drwxr-xr-x 0:0
+//         └─ merge-preview-HnxCiL                                drwxr-xr-x 0:0
+//            └─ checkout                                         drwxr-xr-x 0:0
+//               └─ app                                          drwxr-xr-x 0:0      (empty)
+//
+//   mtimes: the interior tree 2026-10-18T03:03:48.076Z, the root 2026-10-18T03:07:05.384Z (the
+//   run's end); the pass's 2 h bound over the root crossed at 05:07:05.384Z, the first fault
+//   37.6 s later, three within 24 h of GY-23's own three — the class re-armed.
+//
+// The remedy, again live and with the privilege that created the interior (this item's worker,
+// 2026-10-18T05:23:07Z), exactly as GY-23's was:
+//
+//   docker run --rm -v /tmp/gy-tBSJ6Su:/w alpine:latest rm -rf /w/graphyard-goal-compose-preview-16DNmk
+//
+// after which every cycle's report records no 'could not be reclaimed' error again, and the root —
+// empty, this user's own again, and in the pass's unfinished set since the first fault, which
+// makes it due at once whatever its remedy-fresh mtime — was taken whole by a /tmp reclaim pass at
+// 2026-10-18T05:32:46Z run with the loop's own module under the loop's own condition (the
+// unfinished entry, and no holder: the state of the first cycle after the session whose command
+// line named the path ends — which is also why the live pass had kept it until then: the pass's
+// held-open rule keeps any entry a live process's command line names, kept without fault). No
+// later cycle reports the entry: it is gone.
+//
+// The durable halves live where the product lives, and are recorded here for the operator that
+// must run them: the containment — the pass settling a foreign-owned interior as another account's
+// residue instead of faulting every cycle — is already merged on the product's main (GY-1967, PR
+// #1339; this install's CLI predates it at 49665af8eb, PR #1338), so `graphyard upgrade --to` a
+// dated release at or after that merge brings it here; and the creator-side teardown — the
+// containerized run removing its scratch while it still holds the creating privilege, not only in
+// its after hook on a clean end — is the product's own change, to be filed on its own control
+// plane (the /home/vish/code/graphyard install). Both are operator acts by design: the upgrade
+// moves the install's CLI checkout and restarts the loop and executors, and filing on another
+// install's control plane needs that install's credential; a contained worker session holds
+// neither, so this file records them instead of performing them.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -119,6 +185,49 @@ const TMP_ROOT = '/tmp/gy-tY0unUD';
 const INTERIOR = '/tmp/gy-tY0unUD/graphyard-goal-compose-preview-ExM37A';
 const TMP_ROOT_MTIME = Date.parse('2026-10-17T19:09:13.344Z');
 const INTERIOR_MTIME = Date.parse('2026-10-17T18:50:55.280Z');
+
+// ---------------------------------------------------------------------------
+// GY-42: the second recorded occurrence's instants, subjects, details, context and tree.
+// ---------------------------------------------------------------------------
+
+/** GY-42's three recorded instances: the reclaim report's instant, which the fault subject names (resource-reclaims.json, at 2026-10-18T05:07:42.973Z / 05:08:04.488Z / 05:08:25.241Z). */
+const GY42_INSTANCES = [
+  { at: Date.parse('2026-10-18T05:07:42.973Z'), subject: 'reclaim:resources:2026-10-18T05:07:42.973Z' },
+  { at: Date.parse('2026-10-18T05:08:04.488Z'), subject: 'reclaim:resources:2026-10-18T05:08:04.488Z' },
+  { at: Date.parse('2026-10-18T05:08:25.241Z'), subject: 'reclaim:resources:2026-10-18T05:08:25.241Z' }
+];
+
+/** The rm's own refusal at the shallowest foreign-owned directory, Node's message shape. */
+const GY42_RECORDED_RM_ERROR =
+  "EACCES: permission denied, rmdir '/tmp/gy-tBSJ6Su/graphyard-goal-compose-preview-16DNmk/worktrees'";
+/** The pass's error line for the entry, before the report prefixes it (`${path}: ${error.message}`). */
+const GY42_RECORDED_PASS_ERROR = `/tmp/gy-tBSJ6Su: ${GY42_RECORDED_RM_ERROR}`;
+
+/** The detail each recorded instance carries, character for character — the cycle's own context (what it also reaped and freed) around the same refusal. */
+const GY42_RECORDED_DETAILS = [
+  `Resource reclaim: freed 2 MB from 51 stale /tmp entries; 1 could not be reclaimed: Tmp reclaim: ${GY42_RECORDED_PASS_ERROR}`,
+  `Resource reclaim: reaped 1 review and 0 producer ledger record(s); 1 could not be reclaimed: Tmp reclaim: ${GY42_RECORDED_PASS_ERROR}`,
+  `Resource reclaim: reaped 1 review and 0 producer ledger record(s); freed 1 MB from 1 stale /tmp entry; 1 could not be reclaimed: Tmp reclaim: ${GY42_RECORDED_PASS_ERROR}`
+];
+
+/** The uid the item recorded for this interior (its stat and journal name 0; the host presented the standing tree as 65534 `nobody` — see the header). */
+const GY42_CONTAINER_UID = 0, GY42_CONTAINER_GID = 0;
+
+/** GY-42's recorded tree: paths and write times. */
+const GY42_TMP_ROOT = '/tmp/gy-tBSJ6Su';
+const GY42_INTERIOR = '/tmp/gy-tBSJ6Su/graphyard-goal-compose-preview-16DNmk';
+const GY42_TMP_ROOT_MTIME = Date.parse('2026-10-18T03:07:05.384Z');
+const GY42_INTERIOR_MTIME = Date.parse('2026-10-18T03:03:48.076Z');
+
+/** What else each recorded cycle's report holds (resource-reclaims.json, verbatim counts): the ledger records it reaped and the /tmp entries it removed elsewhere — the context the recorded detail lines carry around the refusal. */
+const GY42_CYCLE_CONTEXT = [
+  { reaped: { review: 0, producer: 0 }, otherRemoved: 51, otherBytes: 1_654_698 },
+  { reaped: { review: 1, producer: 0 }, otherRemoved: 0, otherBytes: 0 },
+  { reaped: { review: 1, producer: 0 }, otherRemoved: 1, otherBytes: 0 }
+];
+
+/** Both recordings' roots — GY-23's /tmp/gy-tY0unUD and GY-42's /tmp/gy-tBSJ6Su — each remedied live on the coordinator host. */
+const RECORDED_ROOTS = [TMP_ROOT, GY42_TMP_ROOT];
 
 /** The coordinator checkout whose `.graphyard/` holds the loop's records; absent on a CI runner. */
 const COORDINATOR_ROOT = '/home/vish/code/graphyard-snake-v4';
@@ -295,9 +404,15 @@ function describeTmpReclaim(removed, bytes) {
  * pass's own errors are already prefixed `Tmp reclaim: ` by the report that gathered them
  * (`tmpErrorPrefix`, master-resources.ts), so the first surfaces as
  * `Resource reclaim: N could not be reclaimed: Tmp reclaim: <path>: <message>` — the recorded text.
+ * GY-42's recorded details also carry the cycle's own context — the ledger records the same cycle
+ * reaped (`reaped N review and M producer ledger record(s)`) before the /tmp pass's part — so the
+ * model carries a report's `reaped` counts the same way (no recorded instance of this class closed
+ * or released a session, so those parts stay unmodelled and empty).
  */
 function describeReclaim(report) {
+  const reaped = report.reaped ?? { review: 0, producer: 0 };
   const parts = [
+    reaped.review || reaped.producer ? `reaped ${reaped.review} review and ${reaped.producer} producer ledger record(s)` : '',
     describeTmpReclaim(report.removed.length, report.bytes ?? 0),
     report.errors.length ? `${report.errors.length} could not be reclaimed: ${report.errors[0]}` : ''
   ].filter(Boolean);
@@ -307,6 +422,12 @@ function describeReclaim(report) {
 /** The report the loop's cycle gathers from the pass (master-resources.ts: errors prefixed `Tmp reclaim: `). */
 function cycleReport(pass) {
   return { removed: pass.removed, bytes: 0, errors: pass.errors.map((error) => `Tmp reclaim: ${error}`) };
+}
+
+/** The report a GY-42 cycle gathers: the pass's own outcome beside the cycle's recorded context — what the same cycle reaped and removed elsewhere, as resource-reclaims.json holds it — so the line the model builds is the line the loop recorded. */
+function gy42CycleReport(pass, context) {
+  const others = Array.from({ length: context.otherRemoved }, (_, index) => `<the cycle's other stale /tmp entry ${index + 1}>`);
+  return { reaped: context.reaped, removed: [...pass.removed, ...others], bytes: context.otherBytes, errors: pass.errors.map((error) => `Tmp reclaim: ${error}`) };
 }
 
 // ---------------------------------------------------------------------------
@@ -336,23 +457,63 @@ function recordedBaseTree() {
 }
 
 /**
- * The remedy, modelled as it was performed live on the coordinator host (2026-10-17T22:26Z): the
- * interior removed with the privilege that created it — a container of the same installation, given
- * the root as its mount, whose uid owns every directory of the interior and whose root holds the
- * override the host user lacks (both verified live: the container's rm succeeded where the host
- * user's failed with the recorded EACCES):
- * `docker run --rm -v /tmp/gy-tY0unUD:/w alpine:latest rm -rf /w/graphyard-goal-compose-preview-ExM37A`.
- * The root itself is left for the pass, which is the point: the candidate is judged by the pass.
+ * The remedy, modelled as it was performed live on the coordinator host — GY-23's at
+ * 2026-10-17T22:26Z, GY-42's at 2026-10-18T05:23:07Z — the interior removed with the privilege
+ * that created it: a container of the same installation, given the root as its mount, whose uid
+ * owns every directory of the interior and whose root holds the override the host user lacks
+ * (verified live both times: the container's rm succeeded where the host user's failed with the
+ * recorded EACCES), `docker run --rm -v <root>:/w alpine:latest rm -rf /w/<name>`. The root itself
+ * is left for the pass, which is the point: the candidate is judged by the pass.
  */
-function removeWithCreatingPrivilege(fs, path) {
-  const container = actor(CONTAINER_UID, CONTAINER_GID, true);
-  modelledRm(fs, container, path);
+function removeWithCreatingPrivilege(fs, path, uid = CONTAINER_UID, gid = CONTAINER_GID) {
+  modelledRm(fs, actor(uid, gid, true), path);
 }
 
 /** The base tree after the remedy: the foreign-owned interior gone, the root still the pass's to take. */
 function remediedTree() {
   const fs = recordedBaseTree();
   removeWithCreatingPrivilege(fs, INTERIOR);
+  return fs;
+}
+
+/**
+ * GY-42's recorded base tree: the same host /tmp, this user's ownerless 1700 `gy-` root last
+ * written 2026-10-18T03:07:05.384Z, and beneath it the whole container-created
+ * `graphyard-goal-compose-preview-16DNmk` interior, uid 0 mode 0755, written 03:03:48.076Z and
+ * never removed by the run that made it.
+ */
+function gy42BaseTree() {
+  const fs = new Map();
+  fs.set('/tmp', { kind: 'directory', mode: 0o1777, uid: 0, gid: 0, mtime: 0 });
+  fs.set(GY42_TMP_ROOT, { kind: 'directory', mode: 0o1700, uid: HOST_UID, gid: HOST_GID, mtime: GY42_TMP_ROOT_MTIME });
+  for (const path of [
+    GY42_INTERIOR,
+    `${GY42_INTERIOR}/worktrees`,
+    `${GY42_INTERIOR}/worktrees/merge-preview-HnxCiL`,
+    `${GY42_INTERIOR}/worktrees/merge-preview-HnxCiL/checkout`,
+    `${GY42_INTERIOR}/worktrees/merge-preview-HnxCiL/checkout/app`
+  ]) {
+    fs.set(path, { kind: 'directory', mode: 0o755, uid: GY42_CONTAINER_UID, gid: GY42_CONTAINER_GID, mtime: GY42_INTERIOR_MTIME });
+  }
+  return fs;
+}
+
+/** GY-42's base tree after the live remedy (2026-10-18T05:23:07Z): the interior removed with the privilege that created it, the root left for the pass. */
+function gy42RemediedTree() {
+  const fs = gy42BaseTree();
+  removeWithCreatingPrivilege(fs, GY42_INTERIOR, GY42_CONTAINER_UID, GY42_CONTAINER_GID);
+  return fs;
+}
+
+/**
+ * GY-42's base tree had the run's own teardown removed the interior before it ended: the
+ * creator-side candidate, still undelivered on the product (see the header) — the run removes its
+ * directory from where it made it, with the creating privilege, so the interior never outlives it.
+ */
+function gy42TornDownTree(removedAtMs) {
+  const fs = gy42BaseTree();
+  const clock = tickingClock(removedAtMs);
+  removeTree(fs, actor(GY42_CONTAINER_UID, GY42_CONTAINER_GID, true), GY42_INTERIOR, clock);
   return fs;
 }
 
@@ -491,6 +652,103 @@ test('the candidate, the product handles the case itself: the run that created t
 });
 
 // ---------------------------------------------------------------------------
+// GY-42: the second occurrence — the same mechanism through uid 0, reproduced against its own
+// recorded base and shown not to recur against the remedied and torn-down candidates.
+// ---------------------------------------------------------------------------
+
+test('GY-42: the bound holds the fault until 05:07:05Z: a pass before then keeps the entry and records nothing', () => {
+  const fs = gy42BaseTree();
+  const who = actor(HOST_UID, HOST_GID);
+  // 05:06:30Z — before the 2 h bound over the root's 03:07:05.384Z last write crossed. The first
+  // recorded instance is 37.6 s past the bound: the cycles between may have spent the pass's
+  // per-cycle limit on older entries first (the loop's reports of the hour show passes removing
+  // the 100-per-cycle cap of tsx-cache entries), so the entry faults on the cycles that reach it —
+  // 05:07:42Z, then every ~21 s after, which is the recurrence this item counts.
+  const before = Date.parse('2026-10-18T05:06:30.000Z');
+  const pass = reclaimPass({ fs, who, now: before, clock: tickingClock(before) });
+  assert.equal(pass.kept, 1, 'the ownerless root is kept: younger than the 2 h test-temp bound');
+  assert.deepEqual(pass.removed, []);
+  assert.deepEqual(pass.errors, []);
+  assert.equal(describeReclaim(cycleReport(pass)), null, 'no action line, so no attention and no fault');
+  assert.ok(fs.has(GY42_INTERIOR), 'the tree is untouched');
+});
+
+test('GY-42 instance 2026-10-18T05:07:42.973Z on reclaim:resources:2026-10-18T05:07:42.973Z: the pass adopts the root at its bound and fails on the foreign-owned interior', () => {
+  const fs = gy42BaseTree();
+  const who = actor(HOST_UID, HOST_GID);
+  const pass = reclaimPass({ fs, who, now: GY42_INSTANCES[0].at, clock: tickingClock(GY42_INSTANCES[0].at) });
+  assert.deepEqual(pass.errors, [GY42_RECORDED_PASS_ERROR], 'the pass error line, character for character');
+  assert.deepEqual(pass.removed, [], 'nothing of the entry was removed');
+  assert.equal(pass.kept, 0);
+  assert.ok(fs.has(`${GY42_INTERIOR}/worktrees/merge-preview-HnxCiL/checkout/app`), 'the interior is untouched: rm stopped at the first foreign-owned parent');
+  // The report the cycle gathers — the entry's refusal beside the cycle's own recorded context —
+  // is the recorded detail, exactly.
+  assert.equal(describeReclaim(gy42CycleReport(pass, GY42_CYCLE_CONTEXT[0])), GY42_RECORDED_DETAILS[0]);
+});
+
+test("GY-42 instances 05:08:04.488Z and 05:08:25.241Z: the failed removal returns every later cycle — the recurrence the class counts", () => {
+  const fs = gy42BaseTree();
+  const who = actor(HOST_UID, HOST_GID);
+  // One pass per recorded cycle, sharing the pass's `unfinished` set as the loop's process does:
+  // the first failure adds the entry to it, and each later pass adopts the entry again at once —
+  // each cycle recording the same refusal inside its own context line.
+  const unfinished = new Set();
+  const details = GY42_INSTANCES.map((instance, index) => {
+    const pass = reclaimPass({ fs, who, now: instance.at, clock: tickingClock(instance.at), unfinished });
+    return describeReclaim(gy42CycleReport(pass, GY42_CYCLE_CONTEXT[index]));
+  });
+  assert.deepEqual(details, GY42_RECORDED_DETAILS, 'three cycles, three faults with their cycles\u2019 own context: the threshold crossed');
+  assert.ok(unfinished.has(GY42_TMP_ROOT), 'the entry is still unfinished: the next cycle would fault again');
+  assert.ok(fs.has(GY42_INTERIOR), 'no pass removed anything: the cause stands outside the reach of the pass');
+});
+
+test("GY-42 the shared cause: rm stops at the first foreign-owned parent, and the pass's own repair (GY-1828) deliberately leaves another uid's directories alone", () => {
+  const fs = gy42BaseTree();
+  const who = actor(HOST_UID, HOST_GID);
+  // The repair the pass tries first changes nothing here: every directory missing the owner-write
+  // bit belongs to uid 0, and makeOwnerWritable never chmods another uid's.
+  assert.equal(makeOwnerWritable(fs, HOST_UID, GY42_TMP_ROOT), false);
+  // rm as the host user fails at the shallowest foreign-owned parent, before touching anything.
+  assert.throws(() => modelledRm(fs, who, GY42_TMP_ROOT), (error) => {
+    assert.equal(error.code, 'EACCES');
+    assert.equal(error.message, GY42_RECORDED_RM_ERROR);
+    return true;
+  });
+});
+
+test('GY-42 the candidate, remedy applied: the interior removed with the privilege that created it — the pass reclaims the root whole and no later cycle faults', () => {
+  const fs = gy42RemediedTree();
+  const who = actor(HOST_UID, HOST_GID);
+  const unfinished = new Set();
+  const passes = GY42_INSTANCES.map((instance) => reclaimPass({ fs, who, now: instance.at, clock: tickingClock(instance.at), unfinished }));
+  // The first cycle that reaches the root takes it whole; the recorded instants record no fault.
+  assert.deepEqual(passes[0].removed, [GY42_TMP_ROOT]);
+  assert.deepEqual(passes[0].errors, []);
+  for (const [index, pass] of passes.entries())
+    assert.ok(!describeReclaim(gy42CycleReport(pass, GY42_CYCLE_CONTEXT[index])).includes('could not be reclaimed'), `no fault line on cycle ${index + 1}`);
+  assert.deepEqual(passes[1].removed, [], 'nothing left to adopt');
+  assert.deepEqual(passes[2].removed, [], 'and none the cycle after: no recurrence');
+  assert.equal(fs.has(GY42_TMP_ROOT), false, 'the root is gone');
+  assert.equal(unfinished.size, 0);
+});
+
+test('GY-42 the candidate, the product handles the case itself: the run that created the tree removes it while it still holds the creating privilege', () => {
+  // The goal-compose-preview run's after hook, running where the tree was made: its uid owns every
+  // directory, so the removal succeeds — before the run ends, hours before the pass would ever
+  // meet the entry. Modelled from the base at the run's end, 03:07:30Z. This is the half GY-23's
+  // item named as its candidate condition and never had delivered; until the product delivers it,
+  // every containerized run's abnormal end re-arms this class (the live audits below stand guard).
+  const fs = gy42TornDownTree(Date.parse('2026-10-18T03:07:30.000Z'));
+  assert.equal(fs.has(GY42_INTERIOR), false, 'the teardown removed its own directory');
+  const who = actor(HOST_UID, HOST_GID);
+  const unfinished = new Set();
+  const passes = GY42_INSTANCES.map((instance) => reclaimPass({ fs, who, now: instance.at, clock: tickingClock(instance.at), unfinished }));
+  assert.deepEqual(passes[0].removed, [GY42_TMP_ROOT], 'the pass still takes the root at its bound — whole, and with no error');
+  for (const pass of passes) assert.deepEqual(pass.errors, []);
+  assert.equal(fs.has(GY42_TMP_ROOT), false);
+});
+
+// ---------------------------------------------------------------------------
 // The live audits: on the coordinator host, where the recorded tree stood. A CI runner checks out
 // this repository with no access to that host, so both audits skip there; the reproduction and
 // candidate tests above still run everywhere.
@@ -521,15 +779,19 @@ function treeEntries(path, bound = 10_000) {
 }
 
 test(
-  'live audit on the coordinator host: the recorded subject no longer holds what the pass cannot remove',
-  { skip: !existsSync(TMP_ROOT) && !existsSync(COORDINATOR_ROOT) && `not on the coordinator host: ${COORDINATOR_ROOT} is absent` },
+  'live audit on the coordinator host: the recorded subjects no longer hold what the pass cannot remove',
+  { skip: !existsSync(COORDINATOR_ROOT) && `not on the coordinator host: ${COORDINATOR_ROOT} is absent` },
   () => {
-    if (!existsSync(TMP_ROOT)) return; // gone: the pass reclaimed the root whole after the remedy
-    // Still present (the audit runs between the remedy and the pass's next reach): every entry in
-    // its tree must be this user's again, so the pass removes it whole — no fault can recur on it.
-    const foreign = treeEntries(TMP_ROOT).filter((entry) => entry.uid !== process.getuid());
-    assert.deepEqual(foreign.map((entry) => entry.path), [],
-      `another uid's directories inside ${TMP_ROOT} are what faulted the resources class on every cycle: remove them with the privilege that created them — docker run --rm -v ${TMP_ROOT}:/w alpine:latest rm -rf /w/<name> — leaving the pass to take the root`);
+    // Both recordings' roots — GY-23's /tmp/gy-tY0unUD and GY-42's /tmp/gy-tBSJ6Su — each remedied
+    // live and then taken whole by the pass.
+    for (const recorded of RECORDED_ROOTS) {
+      if (!existsSync(recorded)) continue; // gone: the pass reclaimed the root whole after the remedy
+      // Still present (the audit runs between the remedy and the pass's next reach): every entry in
+      // its tree must be this user's again, so the pass removes it whole — no fault can recur on it.
+      const foreign = treeEntries(recorded).filter((entry) => entry.uid !== process.getuid());
+      assert.deepEqual(foreign.map((entry) => entry.path), [],
+        `another uid's directories inside ${recorded} are what faulted the resources class on every cycle: remove them with the privilege that created them — docker run --rm -v ${recorded}:/w alpine:latest rm -rf /w/<name> — leaving the pass to take the root`);
+    }
   }
 );
 
