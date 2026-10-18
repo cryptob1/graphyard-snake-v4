@@ -137,3 +137,72 @@ the new credential where `master environments` discovers worker credentials, and
 restart. It is idempotent, `--count N` overrides the declaration for one run, and
 it never removes a profile: lowering the count is reported, and the removal stays
 an operator action.
+
+## Candidate resync
+
+The same script also serves the candidate resync coverage: a work item's
+candidate record can name a pull request that is not its candidate's (GY-1's
+read `pr: 1` — a pull request closed unmerged in 2026-10-10 — while the
+candidate head was the head of open PR #4), and no control-plane resync
+corrects such a pointer: the resync is executor work behind a
+coordinator-only permission gate, and the record it would rewrite is
+immutable once delivered. `--resync` corrects it from outside the control
+plane, from any checkout of this repository (a managed worktree included):
+
+```sh
+node scripts/graphyard-executor.mjs --resync               # every item holding a candidate
+node scripts/graphyard-executor.mjs --resync GY-1           # the named items
+node scripts/graphyard-executor.mjs --resync GY-1 --readings prs.json
+```
+
+It reads the control plane's records (read-only, with whatever credential the
+runner holds — any role may read) and the repository's pull requests, verifies
+every candidate pointer through the read-time verification `src/model/work.ts`
+delivers (an open, unmerged pull request whose head is exactly the candidate
+sha against the managed base is the candidate's), and re-points a stale one
+automatically — exactly when the recorded pull request is not the open one at
+the head. Each re-point is recorded in `.graphyard/candidate-resync.json`, so
+the correction stands for every later read of this repository instead of being
+re-derived. Pull-request readings come from `--readings FILE` (a JSON array of
+readings, the form a verified `gh` reading takes), else `gh pr list`, else `git
+ls-remote` on the pull refs — credential-free: a pull ref's head names the
+exact commit, and a live `refs/pull/N/merge` says GitHub still serves the pull
+request open. A closed or merged pull request is never adopted; an ambiguity
+is refused, never guessed. The run also prints the merge-stall invariant's
+reading through the pointers it leaves, so a green mergeable candidate hidden
+behind a stale pointer is counted. `tests/candidate-record-resync.test.js`
+pins the verification, the record, both reading paths and the invariant's
+reading against the recorded base state, and audits the live control plane on
+the coordinator host (CI skips that audit).
+
+## Graphyard session reaping
+
+Approver (and other coordination) sessions whose decisions settled used to stay
+`state=running` and idle for hours — three on GY-1 sat open up to ~5h56m after
+their refusals, far outside the 30-minute threshold the loop counts, because
+dispatch's session reconcile closes only worker-profile sessions and no
+sanctioned command reaped coordination sessions at all. `bin/graphyard.mjs` is
+that command. From the coordinator checkout — the one whose `.graphyard/` holds
+`master.json`, never a managed worktree — run a reaping pass with:
+
+```sh
+node bin/graphyard.mjs --status   # report only; exits 1 while any session lingers past the grace
+node bin/graphyard.mjs --reap     # close every reapable settled-decision session, then report
+```
+
+Each pass reads the control plane (`.graphyard/master.json` names its URL, the
+coordinator credential file and the Herdr workspace) for every work item and its
+decision history, reads Herdr's agent list in the installation's workspace scope,
+and names each approver session the way the loop launches it. A session is
+closed — `herdr pane close`, verified against Herdr's pane inventory — only when
+the decision it was launched to approve has settled (any state but `requested`:
+refused, approved, stale, withdrawn or held) **and** its runtime sits idle or
+done. A session whose decision is still awaited, one still working, a pane
+another workspace holds and an agent no known decision names are never touched,
+and the command never ends leases or closes an implementation session under a
+live attempt. Add `--json` for machine-readable output, or `--grace-ms N` to
+read a different threshold than the default 30 minutes — the age past which a
+still-open settled session is reported as *lingering* and both modes exit 1.
+`tests/fault-class-session-liveness.test.js` replays the three recorded
+instances end to end against a stub control plane and a stub Herdr, and audits
+the live installation when run on the coordinator host.
