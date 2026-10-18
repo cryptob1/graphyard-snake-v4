@@ -4,9 +4,10 @@
 // the regression test the item's criterion asks for: each recorded instance is reproduced below
 // against its recorded base state — the exact deployment, status document and webhook account the
 // installation held at the recorded instants — and shown not to recur against the candidate
-// condition, the state after the shared cause is removed. The last tests audit the live
-// installation on the coordinator host, so the class's standing state stays visible instead of
-// silently re-faulting; CI has no access to that host and skips those audits.
+// condition, the operator's App binding, the one state that removes the shared cause. The last
+// tests audit the live installation on the coordinator host: the audit demands that binding and
+// fails while the recorded base state stands (GY-36), so the class's standing state stays visible
+// instead of silently re-faulting; CI has no access to that host and skips those audits.
 //
 // The recorded instances, verbatim from the item (one per open-pull-request window, each the first
 // loop cycle after the window opened — the ledger's own dispatch events bound them to the second):
@@ -61,31 +62,34 @@
 // 2026-10-17T22:17:51.774Z, which the loop linked to this item rather than filing again — the
 // live cursor holds it, linkedTo GY-15, reproduced below.
 //
-// The candidate condition, each half the product's own:
+// The candidate condition — the operator's App binding, the one half that exists:
 //
-//   · the operator's App binding — `graphyard github-setup http://127.0.0.1:4310` (the manifest
-//     flow) or `graphyard app import` + `app bind SLUG`. On a loopback origin the product's own
-//     manifest design registers the App with no webhook at all (GitHub refuses hook URLs it cannot
-//     reach, so graphyard's appManifest sends no hook_attributes there) and still issues a local
-//     GITHUB_WEBHOOK_SECRET (GY-1474/GY-1476). With the App bound, the delivery log is read with
-//     the App JWT over the deployment's own outbound HTTPS — verified live from inside the server
-//     container (api.github.com answers; the audit below keeps checking) — GitHub, having no
-//     webhook to attempt, logs nothing, and the corroboration machinery (GY-1649) reads the gap as
-//     quiet: no attention item, no fault, no recurrence. A delivery that does arrive is accepted
-//     (the endpoint verifies its HMAC and records the receipt) and reads as delivering: nothing.
+//   · `graphyard github-setup http://127.0.0.1:4310` (the manifest flow) or `graphyard app
+//     import` + `app bind SLUG`. On a loopback origin the product's own manifest design registers
+//     the App with no webhook at all (GitHub refuses hook URLs it cannot reach, so graphyard's
+//     appManifest sends no hook_attributes there) and still issues a local GITHUB_WEBHOOK_SECRET
+//     (GY-1474/GY-1476). With the App bound, the delivery log is read with the App JWT over the
+//     deployment's own outbound HTTPS — verified live from inside the server container
+//     (api.github.com answers; the audit below keeps checking) — GitHub, having no webhook to
+//     attempt, logs nothing, and the corroboration machinery (GY-1649) reads the gap as quiet: no
+//     attention item, no fault, no recurrence. A delivery that does arrive is accepted (the
+//     endpoint verifies its HMAC and records the receipt) and reads as delivering: nothing.
 //     No agent identity may run this half: registering an App happens in the operator's own GitHub
 //     session, and this test names it rather than waiting for it.
-//   · the product handling the case itself (modelled — the GY-23/GY-24 precedent for loop code
-//     this repository does not hold; it lives in graphyard's src/cli/github-budget-attention.ts
-//     and src/master-status.ts): a control plane that reports no GitHub App at all
-//     (status.github false — the installer's own merger:control-plane mode, the one doctor passes
-//     as not required) has no webhook to be silent about. Its silence is the designed polling-only
-//     state, a configuration fact, not a recurring observation fault: the webhook-silence attention
-//     is derived only from a control plane the GitHub service serves, exactly as the status route
-//     gates the corroboration it composes. With that, the App-less deployment raises no
-//     github-budget observation fault on any cycle, and the class cannot recur from the designed
-//     state; with an App bound, the corroboration tells quiet from failing and only a corroborated
-//     failure faults, named with its attempts.
+//
+// GY-36 — the post-merge review of GY-15 — removed the second half this file used to claim: "the
+// product handling the case itself", modelled by a wrapper defined inside the test
+// (`status.github ? cycleFaults(status, now) : []`). No graphyard change gates the webhook-silence
+// attention on the GitHub service: as deployed, webhookAttention (graphyard
+// src/cli/github-budget-attention.ts) builds its item from status.webhooks alone, so the App-less
+// base state faults every open-pull-request window, and a fix that does not exist cannot be the
+// candidate — modelling it proved nothing about the product (the GY-23/GY-24 precedent models loop
+// code at the base, not a change nobody made). What this file carries instead is the honest state:
+// the base state still raises the recorded fault (reproduced above, unwrapped), only the
+// operator's App binding removes the cause, and the live audit below fails while that binding has
+// not landed instead of accepting the unchanged silence as a pass. A future graphyard change that
+// gates the attention on the GitHub service would be a second remedy; until one lands it is named
+// here, never modelled as done.
 //
 // The models below are faithful miniatures of those decision paths, at the fidelity the recorded
 // instances exercised; each cites the graphyard source it models and refuses (rather than guesses)
@@ -446,6 +450,25 @@ function makeLoop() {
 /** The recorded installation: the compose deployment's own state at the recorded instants — no App, no secret, no receipt, the delivery log unreadable. */
 const recordedInstallation = () => ({ env: {}, github: null, receipts: [], work: [] });
 
+/**
+ * The App-bound installation the operator's binding builds — the candidate condition: an App
+ * registered on the loopback origin with no webhook (GitHub refuses hook URLs it cannot reach),
+ * a locally-issued GITHUB_WEBHOOK_SECRET, and the delivery log read with the App JWT — empty,
+ * because GitHub has no webhook to attempt. webhookAttention still runs unguarded over it: the
+ * gate this state removes is the silence itself, corroborated quiet by GY-1649.
+ */
+const appBoundInstallation = () => ({
+  env: { GITHUB_WEBHOOK_SECRET: 'a'.repeat(64) },
+  github: {
+    repository: 'cryptob1/graphyard-snake-v4',
+    settingsUrl: 'https://github.com/settings/apps/graphyard-cryptob1-graphyard-snake-v4',
+    scope: { installationId: 5228638, repositoryId: 987654321 },
+    webhookDeliveries: { observedAt: RECORDED[0].at, attempts: [], coversFrom: null, error: null },
+  },
+  receipts: [],
+  work: [],
+});
+
 /** One pull-request window on the control plane's work records: the submitted candidate the open-count filter reads. */
 const openCandidate = (key, pr) => ({ key, stage: 'build', submission: { pr }, observation: { prState: 'open', merged: false } });
 /** The candidate once its pull request closed: the window's end, as between the recorded instants. */
@@ -622,14 +645,7 @@ test('candidate condition, the operator\'s App binding: the App-bound loopback i
   // loopback origin with no webhook (GitHub refuses hook URLs it cannot reach, so the manifest
   // sends none), a locally-issued GITHUB_WEBHOOK_SECRET, and the delivery log read with the App JWT
   // — empty, because GitHub has no webhook to attempt. The gap reads quiet (GY-1649), not unverified.
-  const installation = recordedInstallation();
-  installation.env.GITHUB_WEBHOOK_SECRET = 'a'.repeat(64);
-  installation.github = {
-    repository: 'cryptob1/graphyard-snake-v4',
-    settingsUrl: 'https://github.com/settings/apps/graphyard-cryptob1-graphyard-snake-v4',
-    scope: { installationId: 5228638, repositoryId: 987654321 },
-    webhookDeliveries: { observedAt: RECORDED[0].at, attempts: [], coversFrom: null, error: null },
-  };
+  const installation = appBoundInstallation();
   const loop = makeLoop();
   const candidates = [openCandidate('GY-A', RECORDED[0].pr), openCandidate('GY-B', RECORDED[1].pr), openCandidate('GY-C', RECORDED[2].pr), openCandidate('GY-D', AFTER_FILING.pr)];
   for (const [index, { at }] of [...RECORDED, AFTER_FILING].entries()) {
@@ -680,40 +696,91 @@ test('candidate condition, the operator\'s App binding: the App-bound loopback i
   assert.doesNotMatch(failing.observations[0].text, /could not be read/);
 });
 
-test('candidate condition, the product handling the case itself: a control plane reporting no GitHub App raises no observation fault for the silence it was installed to have', () => {
-  // The model of the loop-code half (the GY-23/GY-24 precedent: the code lives in graphyard's
-  // src/cli/github-budget-attention.ts and src/master-status.ts, which this repository does not
-  // hold). The status route already gates the corroboration on the GitHub service existing; the
-  // attention builder takes the same gate: a control plane that reports status.github false has no
-  // webhook to be silent about — its silence is the designed polling-only state of the installer's
-  // own merger:control-plane mode (the one doctor passes as "not required"), a configuration fact,
-  // not a recurring observation fault.
-  const webhookFaults = (status, now) => (status.github ? cycleFaults(status, now) : []);
-  const installation = recordedInstallation();
-  const loop = makeLoop();
-  const step = (work, at) => {
-    installation.work = work;
-    const status = serveStatus(installation, Date.parse(at));
-    const observations = webhookFaults(status, Date.parse(at));
-    trackFaults(loop.state.faults, observations, at);
-    return { status, observations };
-  };
-  const candidates = [openCandidate('GY-A', RECORDED[0].pr), openCandidate('GY-B', RECORDED[1].pr), openCandidate('GY-C', RECORDED[2].pr), openCandidate('GY-D', AFTER_FILING.pr)];
-  for (const [index, { at }] of [...RECORDED, AFTER_FILING].entries()) {
-    const cycle = step(candidates.map((candidate, which) => which <= index ? candidate : closedCandidate(candidate)), at);
-    assert.equal(cycle.status.github, false);
-    assert.equal(cycle.status.webhooks.state, 'unverified', 'the account is as unverified as ever — the change is that the loop no longer faults its own designed state');
-    assert.deepEqual(cycle.observations, []);
+// ---------------------------------------------------------------------------
+// The audit's own verdict (GY-36, the post-merge review of GY-15): the live audit below no longer
+// accepts the recorded base state as a pass. Until the operator's App binding lands, the audit
+// fails — the class's remedy is named, never modelled as done — so the suite itself carries the
+// demand instead of silently accepting the unchanged silence.
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a status document carries the candidate condition the class's remedy names: a bound
+ * GitHub App whose webhook account is corroborated (quiet, answered, delivering or failing —
+ * never the structural unverified silence the recorded instances carried). The recorded base
+ * state (status.github false) is a failure whose own text names the remedy, so the audit's failure
+ * message is the demand, not a mystery.
+ */
+function auditVerdict(status) {
+  const failures = [];
+  if (status.github !== true) {
+    failures.push('status.github is false: the control plane still serves with no GitHub App — the recorded base state, which this audit no longer accepts as a pass; the remedy is the operator\'s App binding (`graphyard github-setup http://127.0.0.1:4310`, or `graphyard app import` + `app bind SLUG`), which no agent identity may run');
+  } else {
+    if (status.webhooks?.configured !== true) failures.push('GITHUB_WEBHOOK_SECRET is not set');
+    if (!status.webhooks || !('deliveryLogAt' in status.webhooks)) failures.push('the corroboration is absent: no GitHub service exists to read the delivery log');
+    else if (status.webhooks.state === 'unverified') failures.push('the webhook account is still unverified');
   }
-  assert.deepEqual(loop.state.faults.instances, [], 'no instance, no count, no threshold');
-  assert.deepEqual(recurringClasses(loop.state.faults.instances, loop.state.work, Date.parse(AFTER_FILING.at)), [], 'nothing files');
+  return { pass: failures.length === 0, failures };
+}
+
+// GY-36 (the post-merge review of GY-15, finding at tests/fault-class-observation.test.js:725):
+// the review rejected two claims this file used to make — that the live audit could pass while the
+// unchanged base state stands (status.github false, webhooks 'unverified'), and that a wrapper
+// defined inside the test (`status.github ? cycleFaults(status, now) : []`) modelled "the product
+// handling the case itself". No graphyard change gates the webhook-silence attention on the GitHub
+// service: as deployed, webhookAttention (src/cli/github-budget-attention.ts) builds its item from
+// status.webhooks alone, so the App-less base state faults every open-pull-request window and only
+// the operator's App binding removes the cause. This case pins the honest state this file now
+// carries: the actual decision path, unwrapped, still raises the recorded fault on the base state;
+// the audit's verdict fails that state and passes the corroborated one.
+test('unit:post-merge-follow-up-1: the audit fails the recorded base state instead of accepting it, and no test-defined wrapper claims the product suppresses the fault', () => {
+  const installation = recordedInstallation();
+  installation.work = [openCandidate('GY-A', RECORDED[0].pr)];
+  const base = serveStatus(installation, Date.parse(RECORDED[0].at));
+
+  // The verdict the live audit below reaches for the same document: the base state fails, and the
+  // failure names the remedy rather than passing the unchanged silence off as removal.
+  const verdict = auditVerdict(base);
+  assert.equal(verdict.pass, false, 'the recorded base state is no longer a pass');
+  assert.equal(verdict.failures.length, 1);
+  assert.match(verdict.failures[0], /^status\.github is false/);
+  assert.match(verdict.failures[0], /App binding/);
+
+  // No wrapper stands between the status document and the loop's own decision path: the model of
+  // the deployed attention builder raises the recorded fault on the base document, because no
+  // product change gates it on the GitHub service.
+  const observations = cycleFaults(base, Date.parse(RECORDED[0].at));
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].kind, 'github-budget');
+  assert.equal(observations[0].faultClass, 'observation');
+  assert.equal(observations[0].text, RECORDED_DETAIL);
+
+  // The candidate condition the remedy names, once it lands, passes the same verdict: the
+  // App-bound document is corroborated and quiet...
+  const bound = appBoundInstallation();
+  bound.work = [openCandidate('GY-A', RECORDED[0].pr)];
+  const quiet = serveStatus(bound, Date.parse(RECORDED[0].at));
+  assert.equal(quiet.github, true);
+  assert.equal(quiet.webhooks.state, 'quiet');
+  assert.deepEqual(auditVerdict(quiet), { pass: true, failures: [] });
+
+  // ...and a corroborated failure passes the structural audit too: it is a real, named finding for
+  // the operator (a broken webhook), not the structural unverified silence this class was filed
+  // for — the audit demands corroboration, not quiet.
+  bound.github.webhookDeliveries = {
+    observedAt: new Date(Date.parse(RECORDED[0].at) + 7_200_000).toISOString(),
+    attempts: [{ at: new Date(Date.parse(RECORDED[0].at) + 6_600_000).toISOString(), statusCode: 0, event: 'pull_request', installationId: 5228638, repositoryId: 987654321 }],
+    coversFrom: null, error: null,
+  };
+  const failing = serveStatus(bound, Date.parse(RECORDED[0].at) + 7_200_000);
+  assert.equal(failing.webhooks.state, 'failing');
+  assert.equal(auditVerdict(failing).pass, true);
 });
 
 // The live installation, audited only where it exists: on the coordinator host. CI checks out this
 // repository on a GitHub runner, which has no access to that host's files or its control plane, so
 // the audit skips there (the recorded-state reproductions above still run).
 test(
-  'live audit on the coordinator host: the status document still serves the recorded base state, or the App binding has landed',
+  'live audit on the coordinator host: the App binding has landed — the recorded base state fails the audit while it stands',
   { skip: !existsSync(MASTER_CONFIG) && `not on the coordinator host: ${MASTER_CONFIG} is absent` },
   async () => {
     const master = JSON.parse(readFileSync(MASTER_CONFIG, 'utf8'));
@@ -722,27 +789,17 @@ test(
     assert.equal(response.status, 200);
     const status = await response.json();
     assert.equal(status.repository, 'cryptob1/graphyard-snake-v4');
-    if (status.github === false) {
-      // The recorded base state stands: the deployment serves with no GitHub App, so the webhook
-      // account is exactly what the recorded instants read. The remedy this item names for it is
-      // the operator's App binding (`graphyard github-setup http://127.0.0.1:4310`, or
-      // `graphyard app import` + `app bind SLUG`), which no agent identity may run: registering an
-      // App happens in the operator's own GitHub session. While it stands, every instance of the
-      // class — including the ones this item's own pull-request window raises — is this named,
-      // operator-remediable condition, not a new mystery.
-      assert.equal(status.webhooks.configured, false, 'GITHUB_WEBHOOK_SECRET is not set');
-      assert.equal(status.webhooks.lastDeliveryAt, null, 'no delivery has ever been accepted');
-      assert.equal('deliveryLogAt' in status.webhooks, false, 'the corroboration is absent: no GitHub service exists to read the log');
-      assert.equal(status.webhooks.state, 'unverified');
-      assert.equal(typeof status.webhooks.openPullRequests, 'number');
-    } else {
-      // The App binding has landed: the candidate condition, live. The account is corroborated —
-      // it reads quiet, answered, delivering or failing, never the structural unverified silence
-      // the recorded instances carried (a failing log read is a real finding and fails here).
-      assert.equal(status.webhooks.configured, true);
-      assert.ok('deliveryLogAt' in status.webhooks, 'the delivery log is read');
-      assert.notEqual(status.webhooks.state, 'unverified');
-    }
+    // GY-36: this audit used to accept status.github === false — the unchanged recorded base
+    // state — as a pass, which the post-merge review of GY-15 rejected: an audit that accepts the
+    // base state counts the cause as removed while nothing has changed. It now demands the
+    // candidate condition itself, the operator's App binding, corroborated. While the base state
+    // stands the audit fails, on purpose, naming the remedy — the operator's own GitHub session,
+    // which no agent identity may run. Every instance the class raises until then, including any
+    // this item's own pull-request window raises, is that named, operator-remediable condition
+    // (GY-15 stands for the class and the loop counts its instances against it), not a new mystery.
+    const verdict = auditVerdict(status);
+    assert.ok(verdict.pass, `the App binding the class's remedy names has not landed: ${verdict.failures.join('; ')}`);
+    assert.equal(typeof status.webhooks.openPullRequests, 'number');
   }
 );
 
