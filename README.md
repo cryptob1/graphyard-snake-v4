@@ -138,6 +138,43 @@ restart. It is idempotent, `--count N` overrides the declaration for one run, an
 it never removes a profile: lowering the count is reported, and the removal stays
 an operator action.
 
+## Candidate resync
+
+The same script also serves the candidate resync coverage: a work item's
+candidate record can name a pull request that is not its candidate's (GY-1's
+read `pr: 1` — a pull request closed unmerged in 2026-10-10 — while the
+candidate head was the head of open PR #4), and no control-plane resync
+corrects such a pointer: the resync is executor work behind a
+coordinator-only permission gate, and the record it would rewrite is
+immutable once delivered. `--resync` corrects it from outside the control
+plane, from any checkout of this repository (a managed worktree included):
+
+```sh
+node scripts/graphyard-executor.mjs --resync               # every item holding a candidate
+node scripts/graphyard-executor.mjs --resync GY-1           # the named items
+node scripts/graphyard-executor.mjs --resync GY-1 --readings prs.json
+```
+
+It reads the control plane's records (read-only, with whatever credential the
+runner holds — any role may read) and the repository's pull requests, verifies
+every candidate pointer through the read-time verification `src/model/work.ts`
+delivers (an open, unmerged pull request whose head is exactly the candidate
+sha against the managed base is the candidate's), and re-points a stale one
+automatically — exactly when the recorded pull request is not the open one at
+the head. Each re-point is recorded in `.graphyard/candidate-resync.json`, so
+the correction stands for every later read of this repository instead of being
+re-derived. Pull-request readings come from `--readings FILE` (a JSON array of
+readings, the form a verified `gh` reading takes), else `gh pr list`, else `git
+ls-remote` on the pull refs — credential-free: a pull ref's head names the
+exact commit, and a live `refs/pull/N/merge` says GitHub still serves the pull
+request open. A closed or merged pull request is never adopted; an ambiguity
+is refused, never guessed. The run also prints the merge-stall invariant's
+reading through the pointers it leaves, so a green mergeable candidate hidden
+behind a stale pointer is counted. `tests/candidate-record-resync.test.js`
+pins the verification, the record, both reading paths and the invariant's
+reading against the recorded base state, and audits the live control plane on
+the coordinator host (CI skips that audit).
+
 ## Graphyard session reaping
 
 Approver (and other coordination) sessions whose decisions settled used to stay
