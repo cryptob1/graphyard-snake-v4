@@ -178,9 +178,11 @@ export function stalePointerReworkReason(candidate: Candidate, stale: PullReques
 export interface DecisionRead {
   /**
    * The rework premise built from the verified standing, or null when the verified read holds none
-   * — an open candidate is never retired on a closed pull request's facts. When the head holds no
-   * open pull request the premise cites the head's own standing, or its own former pull request's
-   * facts when a closed or merged reading sits at exactly the head: never another pull request's.
+   * — an open candidate is never retired on a closed pull request's facts, and a candidate whose
+   * own pull request merged at its head delivered, so it holds none either. When the head holds
+   * no open pull request the premise cites the head's own standing, or its own former pull
+   * request's facts when a closed-unmerged reading sits at exactly the head: never another pull
+   * request's.
    */
   rework: string | null;
   /** The standing the decision cites instead: the verified pointer's own finding. */
@@ -195,10 +197,13 @@ export interface DecisionRead {
  * `stalePointerReworkReason` — see `unverifiedReworkReason`, which reproduces that path; through
  * the verification no reason is built from a pull request that is not the candidate's, so the
  * recorded premise cannot recur. A head the verified read finds open holds no premise at all; a
- * head with no open pull request holds a genuine one built from its own standing — its own former
- * pull request's facts when a closed or merged reading sits at exactly that head against the
- * managed base, and otherwise the head's bare lack of an open pull request, with the stored number
- * named only as a number that named a pull request that is not the candidate's, never as grounds.
+ * head whose own pull request was merged holds none either — a merged pull request at exactly the
+ * candidate head against the managed base is a delivery, not a defect, so nothing retires it; a
+ * head with no open pull request holds a genuine one built from its own standing — its own
+ * former pull request's facts when a closed-unmerged reading sits at exactly that head against
+ * the managed base, and otherwise the head's bare lack of an open pull request, with the stored
+ * number named only as a number that named a pull request that is not the candidate's, never as
+ * grounds.
  */
 export function readCandidateForDecision(
   work: WorkItem,
@@ -211,9 +216,13 @@ export function readCandidateForDecision(
   if (verification.pull) {
     return { rework: null, standing: verification.basis, candidate: verification.candidate, corrected: verification.corrected };
   }
-  const own = readings.find(
-    reading => reading.headSha === candidate.sha && reading.baseBranch === baseBranch && (reading.state === 'closed' || reading.merged),
-  );
+  const atHead = readings.filter(reading => reading.headSha === candidate.sha && reading.baseBranch === baseBranch);
+  if (atHead.some(reading => reading.merged)) {
+    // The candidate's own pull request, merged at exactly its head: a delivery, not a defect —
+    // no premise retires a candidate that delivered (GY-34's live audit holds this standing).
+    return { rework: null, standing: verification.basis, candidate: verification.candidate, corrected: verification.corrected };
+  }
+  const own = atHead.find(reading => reading.state === 'closed' && !reading.merged);
   const rework = own
     ? stalePullPremise(candidate, own)
     : `it heads no open pull request against ${baseBranch} (the stored PR #${candidate.pr} names a pull request that is not the candidate's)`;

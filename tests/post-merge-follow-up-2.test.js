@@ -137,6 +137,12 @@ test('unit:post-merge-follow-up-2 a genuine premise is built from the verified s
   assert.match(noPull ?? '', /it heads no open pull request against main/);
   assert.match(noPull ?? '', /the stored PR #1 names a pull request that is not the candidate's/);
   assert.doesNotMatch(noPull ?? '', /PR #1 was closed unmerged/, 'the closed PR #1\'s facts are never the grounds');
+  // Third arm — the candidate's own pull request merged at exactly its head (the live world
+  // GY-34's audit holds): a delivery, not a defect, so it holds no premise at all — nothing
+  // retires a candidate that delivered, whatever number its record still stores.
+  const delivered = decisionReason(GY1, [PR1, { ...PR4, state: 'closed', merged: true }], QUEUE);
+  assert.equal(delivered, null, 'a merged pull request at the head is a delivery, not a rework premise');
+  assert.equal(readCandidateForDecision(GY1, [PR1, { ...PR4, state: 'closed', merged: true }])?.rework, null);
   // An open pull request at the head against a foreign base (PR #1 targeted master; a sibling
   // open against master here) is not the candidate's either: the premise stays the head's own
   // standing against the managed base.
@@ -175,13 +181,16 @@ test('unit:post-merge-follow-up-2 the guard the review named: over every world t
   // number the record has held (1 stale, 4 corrected), against every reading of PR #4's standing.
   for (const storedPr of [1, 4]) {
     const work = { ...GY1, candidate: { ...GY1.candidate, pr: storedPr } };
-    for (const pull of [PR4, { ...PR4, state: 'closed', closedAt: '2026-10-17T22:00:00Z' }]) {
+    for (const pull of [PR4, { ...PR4, state: 'closed', closedAt: '2026-10-17T22:00:00Z' }, { ...PR4, state: 'closed', merged: true }]) {
       const reason = decisionReason(work, [PR1, pull], QUEUE);
       if (pull.state === 'open') {
         // The candidate stands open: no reason at all, whatever number the record stores.
         assert.equal(reason, null, `stored PR #${storedPr}, PR #4 open: no reason is composed`);
+      } else if (pull.merged) {
+        // The candidate's own pull request merged at its head: delivered — no reason either.
+        assert.equal(reason, null, `stored PR #${storedPr}, PR #4 merged: a delivery is never a rework premise`);
       } else {
-        // The candidate's own pull request closed: a reason may exist, citing PR #4's own facts.
+        // The candidate's own pull request closed unmerged: a reason may exist, citing PR #4's own facts.
         assert.match(reason ?? '', /its PR #4 was closed unmerged/);
       }
       // And never, in any world, the closed PR #1's facts as the candidate's grounds.
