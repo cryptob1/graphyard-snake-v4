@@ -33,6 +33,17 @@
 // read the consumer was already making. The shapes mirror the graphyard source this models: the
 // `Candidate` of graphyard's own src/model/work.ts, and the pull-request reading its github.ts
 // collects. Pure functions, no imports, so the regression tests run it under plain `node --test`.
+//
+// GY-35 — the wiring the post-merge review of GY-24 found missing: the verification existed, but
+// nothing read through it — no decision or rework path called `readCandidateForDecision` or
+// `verifiedCandidate`, so decision reasons were still composed from the unverified stored pointer
+// (and `readCandidateForDecision` hard-coded `rework: null`, so even its own claim held only by
+// construction). Now the decision path's own composer `decisionReason` reads through
+// `readCandidateForDecision`, which builds its premise from the verified standing instead of a
+// hard-coded null, and the loop model's every decision cycle composes through that composer by
+// default (`runCycles` verifies unless the world explicitly models the recorded base state's
+// reader). `unverifiedReworkReason` remains only as the reproduction of the recorded base state —
+// no decision path composes through it.
 
 /** The candidate pointer exactly as the work item record holds it (graphyard src/model/work.ts `Candidate`). */
 export interface Candidate {
@@ -165,7 +176,14 @@ export function stalePointerReworkReason(candidate: Candidate, stale: PullReques
 
 /** The decision read: the pointer verified, the reason a decision may cite built from the verified read alone. */
 export interface DecisionRead {
-  /** A rework premise, or null when the verified read holds none — an open candidate is never retired on a closed pull request's facts. */
+  /**
+   * The rework premise built from the verified standing, or null when the verified read holds none
+   * — an open candidate is never retired on a closed pull request's facts, and a candidate whose
+   * own pull request merged at its head delivered, so it holds none either. When the head holds
+   * no open pull request the premise cites the head's own standing, or its own former pull
+   * request's facts when a closed-unmerged reading sits at exactly the head: never another pull
+   * request's.
+   */
   rework: string | null;
   /** The standing the decision cites instead: the verified pointer's own finding. */
   standing: string;
@@ -178,7 +196,14 @@ export interface DecisionRead {
  * the verified read. Without the verification (the recorded base state) the same inputs produced
  * `stalePointerReworkReason` — see `unverifiedReworkReason`, which reproduces that path; through
  * the verification no reason is built from a pull request that is not the candidate's, so the
- * recorded premise cannot recur.
+ * recorded premise cannot recur. A head the verified read finds open holds no premise at all; a
+ * head whose own pull request was merged holds none either — a merged pull request at exactly the
+ * candidate head against the managed base is a delivery, not a defect, so nothing retires it; a
+ * head with no open pull request holds a genuine one built from its own standing — its own
+ * former pull request's facts when a closed-unmerged reading sits at exactly that head against
+ * the managed base, and otherwise the head's bare lack of an open pull request, with the stored
+ * number named only as a number that named a pull request that is not the candidate's, never as
+ * grounds.
  */
 export function readCandidateForDecision(
   work: WorkItem,
@@ -186,12 +211,49 @@ export function readCandidateForDecision(
   baseBranch = 'main',
 ): DecisionRead | null {
   if (!work.candidate) return null;
-  const verification = verifiedCandidate(work.candidate, readings, baseBranch);
-  return { rework: null, standing: verification.basis, candidate: verification.candidate, corrected: verification.corrected };
+  const candidate = work.candidate;
+  const verification = verifiedCandidate(candidate, readings, baseBranch);
+  if (verification.pull) {
+    return { rework: null, standing: verification.basis, candidate: verification.candidate, corrected: verification.corrected };
+  }
+  const atHead = readings.filter(reading => reading.headSha === candidate.sha && reading.baseBranch === baseBranch);
+  if (atHead.some(reading => reading.merged)) {
+    // The candidate's own pull request, merged at exactly its head: a delivery, not a defect —
+    // no premise retires a candidate that delivered (GY-34's live audit holds this standing).
+    return { rework: null, standing: verification.basis, candidate: verification.candidate, corrected: verification.corrected };
+  }
+  const own = atHead.find(reading => reading.state === 'closed' && !reading.merged);
+  const rework = own
+    ? stalePullPremise(candidate, own)
+    : `it heads no open pull request against ${baseBranch} (the stored PR #${candidate.pr} names a pull request that is not the candidate's)`;
+  return { rework, standing: verification.basis, candidate: verification.candidate, corrected: verification.corrected };
 }
 
 /**
- * The recorded base state's own read, kept for the regression to reproduce the fault: the reason
+ * The decision path's own composer (GY-35's wiring): the reason a rework decision cites, read
+ * through the verified pointer and never through the stored number. The sentence keeps the
+ * recorded decision's shape — premise, the provider's queue reading, the retirement it asks for —
+ * but every premise comes from `readCandidateForDecision`'s verified read, so on the recorded
+ * inputs it composes no reason at all (the candidate stands open at PR #4), and where a head
+ * truly holds no open pull request the premise cites the head's own standing or its own former
+ * pull request's facts. The recorded fault — retiring an open candidate on a closed pull request's
+ * facts read through a stale pointer — is not a sentence this composer can produce: PR #1's facts
+ * enter a reason only through `unverifiedReworkReason`, the reproduction of the recorded base state.
+ */
+export function decisionReason(
+  work: WorkItem,
+  readings: readonly PullRequestReading[],
+  queue: ProviderQueueReading,
+  baseBranch = 'main',
+): string | null {
+  const read = readCandidateForDecision(work, readings, baseBranch);
+  if (!read || read.rework === null) return null;
+  return `Candidate ${read.candidate.sha.slice(0, 12)} cannot deliver: ${read.rework} and GitHub reports the head conflicting with the fresh main ${queue.baseTip} (mergeStateStatus ${queue.mergeStateStatus}), so the test gate can never pass; retire this candidate and rebuild on the current base`;
+}
+
+/**
+ * The recorded base state's own read, kept only for the regression to reproduce the fault (no
+ * decision path composes through it — GY-35 wired `decisionReason` in as the composer): the reason
  * composed straight from the stored pointer, the pull request that number names, and the queue
  * reading — verified against nothing. The pull request the stored number names is looked up in the
  * same readings; a stored number naming an open pull request at the candidate head holds no
@@ -249,8 +311,12 @@ export function observationWrites(work: WorkItem): boolean {
 export interface ResyncWorld {
   /** Live executors serving resync at the instant (the recorded instant: 0 — "all three executors stopped"). */
   executors: number;
-  /** This change: the reader verifies the pointer itself, with no executor and no resync at all. */
-  verifyAtRead: boolean;
+  /**
+   * This change: the reader verifies the pointer itself, with no executor and no resync at all.
+   * Defaults to true — the delivered decision path verifies; a world modelling the recorded base
+   * state's reader (the one that trusted the stored number) passes false explicitly.
+   */
+  verifyAtRead?: boolean;
   /** The role asking for the resync; the executor carries the coordinator credential. */
   role?: Role;
 }
@@ -262,7 +328,7 @@ export interface CycleTrace {
   pointer: { pr: number; correctedAtCycle: number | null; from: number | null };
   /** The resync row: when it completed, and what completed it — an executor's claim, or the read itself. */
   resync: { completedAtCycle: number | null; by: 'executor' | 'read' | null };
-  /** Each cycle's decision premise: the recorded sentence while the read is unverified, null once the verified read holds none. */
+  /** Each cycle's decision reason: the recorded sentence while the read is unverified; through the verified read, null while the candidate stands open, and the head's own standing when it truly holds no open pull request. */
   reasons: (string | null)[];
 }
 
@@ -296,9 +362,11 @@ export function runCycles(
     reasons: [],
   };
   for (let cycle = 0; cycle < cycles; cycle++) {
-    if (world.verifyAtRead) {
+    if (world.verifyAtRead !== false) {
+      // The decision cycle composes its reason through the decision path's own composer, which
+      // reads through the very same verified read (the bookkeeping below needs the read itself).
       const read = readCandidateForDecision(work, readings, baseBranch);
-      trace.reasons.push(read ? read.rework : null);
+      trace.reasons.push(decisionReason(work, readings, queue, baseBranch));
       if (read?.corrected && trace.pointer.correctedAtCycle === null) {
         trace.pointer = { pr: read.candidate.pr, correctedAtCycle: cycle, from: work.candidate?.pr ?? null };
       }
