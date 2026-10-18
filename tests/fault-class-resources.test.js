@@ -84,8 +84,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // The file runs under Node's built-in test runner and needs no installed dependency: it imports
 // only Node builtins and carries its own fixtures. (Plain JavaScript, like every other test of
@@ -495,13 +496,20 @@ test('the candidate, the product handles the case itself: the run that created t
 // candidate tests above still run everywhere.
 // ---------------------------------------------------------------------------
 
+/** The entries of `directory`, or none when it cannot be read. The audits walk exactly the entries the running loop's reclaim pass deletes every ~21 s on this host — this user's, test-temp-named, past the 2 h bound — so a directory an audit has just seen can be gone before it is read; a read that faults there faults the audit itself, which is the race the post-merge review filed (GY-33). */
+function readdirOrNone(directory) {
+  try { return readdirSync(directory); } catch { return null; } // removed while auditing: gone with the pass that reclaimed it
+}
+
 /** Every entry under `path`, breadth-bounded: the recorded class's trees are a handful deep, and a bounded walk never lets a pathological tree stall the audit. */
 function treeEntries(path, bound = 10_000) {
   const found = [];
   const stack = [path];
   while (stack.length && found.length < bound) {
     const directory = stack.pop();
-    for (const name of readdirSync(directory)) {
+    const names = readdirOrNone(directory);
+    if (!names) continue; // removed while walking: the audit folds it away, it does not fault
+    for (const name of names) {
       const entry = `${directory === '/' ? '' : directory}/${name}`;
       let info;
       try { info = statSync(entry); } catch { continue; } // removed while walking
@@ -544,7 +552,9 @@ test(
         let info;
         try { info = statSync(path); } catch { continue; }
         if (!info.isDirectory() || info.uid !== process.getuid()) continue; // only this user's entries are the pass's
-        const written = Math.max(info.mtimeMs, ...readdirSync(path).map((entry) => { try { return statSync(`${path}/${entry}`).mtimeMs; } catch { return 0; } }));
+        const children = readdirOrNone(path);
+        if (!children) continue; // removed while auditing: no longer the pass's to fault
+        const written = Math.max(info.mtimeMs, ...children.map((entry) => { try { return statSync(`${path}/${entry}`).mtimeMs; } catch { return 0; } }));
         if (Date.now() - written < TEST_TEMP_MIN_AGE_MS) continue; // younger than the bound: kept, not adopted
         const foreign = treeEntries(path).find((entry) => entry.uid !== process.getuid());
         if (foreign) offenders.push(`${path} (held by uid ${foreign.uid}: ${foreign.path})`);
@@ -554,3 +564,30 @@ test(
       'each of these entries faults the resources class on every cycle the pass reaches it, and no pass of this user can clear it: remove the foreign-owned tree inside each with the privilege that created it — docker run --rm -v <entry>:/w alpine:latest rm -rf /w/<name> — and have the run that creates such trees remove them before it ends');
   }
 );
+
+// ---------------------------------------------------------------------------
+// The post-merge follow-up (GY-33): the audits above called `readdirSync` without a guard —
+// `treeEntries` and the age check — so the very race they audit, the running loop's pass deleting
+// this user's test-temp entries, could fault the audit itself and fail the file spuriously. Every
+// directory read the audits make now goes through `readdirOrNone`, and this case pins that.
+// ---------------------------------------------------------------------------
+
+test('unit:post-merge-follow-up-1 the audits survive the pass reclaiming an entry under them: every directory they read is guarded, and a tree that stands still walks whole', () => {
+  // The recorded race, made deterministic: an entry the audit has just statSynced is removed before
+  // it is read — the base's unguarded read faults exactly there, taking the whole audit down with it.
+  const gone = mkdtempSync(join(tmpdir(), 'gy-33-audit-race-'));
+  rmSync(gone, { recursive: true, force: true });
+  assert.equal(existsSync(gone), false);
+  assert.throws(() => readdirSync(gone), (error) => error.code === 'ENOENT', 'the unguarded read the audits made at the base');
+  // treeEntries, the walk both audits use: a removed directory reads as no entries, never a fault.
+  assert.deepEqual(treeEntries(gone), []);
+  // The age check's own read: a removed entry has no children to age, so the audit skips it.
+  assert.equal(readdirOrNone(gone), null);
+  // And the guard changes nothing when nothing is removed: a standing tree still walks whole.
+  const live = mkdtempSync(join(tmpdir(), 'gy-33-audit-live-'));
+  mkdirSync(join(live, 'child'));
+  writeFileSync(join(live, 'child', 'file'), 'entry');
+  const walked = treeEntries(live).map((entry) => entry.path).sort();
+  rmSync(live, { recursive: true, force: true });
+  assert.deepEqual(walked, [join(live, 'child'), join(live, 'child', 'file')].sort());
+});
