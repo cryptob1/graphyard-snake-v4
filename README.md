@@ -206,3 +206,42 @@ still-open settled session is reported as *lingering* and both modes exit 1.
 `tests/fault-class-session-liveness.test.js` replays the three recorded
 instances end to end against a stub control plane and a stub Herdr, and audits
 the live installation when run on the coordinator host.
+
+## Graphyard credential audit
+
+The doctor/work principal's bearer token once went stale for hours: `status
+GY-N` reads, doctor report posts and work filings were all refused 401 `A valid
+Graphyard bearer token is required` while the master's own reads succeeded,
+because every plane call the loop's doctor identity makes runs as one operator
+credential — the file `.graphyard/master.json` names — and nothing on the host
+verified it still authenticated; the post step's only remedy is "posted again
+next cycle", so the same 401 retried until someone refreshed the credential and
+restarted the master run (a running loop keeps its loaded settings when
+`credentialFile` or `cliPath` changes). `bin/graphyard.mjs credentials` is the
+reading that was missing. From the coordinator checkout run:
+
+```sh
+node bin/graphyard.mjs credentials              # audit only; writes nothing
+node bin/graphyard.mjs credentials --refresh    # also repair each stale credential, then re-read
+```
+
+Each pass probes every credential file the coordinator config names — the
+coordinator's own, the operator agent's (the doctor identity), the approver's
+and each worker's — plus the ambient session credential the environment holds
+(`GRAPHYARD_TOKEN_FILE`, the credential a loop-launched doctor session actually
+runs as), with the exact work read `status GY-N` makes (`GET /api/work/:key`;
+`--key GY-1` by default). `--json` gives machine-readable output. Both modes
+exit 1 while any credential refuses its work read, so the recorded contrast —
+the doctor refused while the master reads succeed — is one failing exit code
+instead of a silent stream. `--refresh` repairs a stale credential before
+re-reading, never printing a token: a credential whose role has another file
+the config names that authenticates takes that file's token (the recorded
+remedy — the fresh token the re-provisioned setup wrote beside the stale one);
+the doctor's own file with no alternate is minted fresh through the control
+plane's rotate route (`POST /api/operator-agents/:id/rotate`, authorized by the
+first credential of the config's the plane still accepts); anything else is
+reported unrefreshable with the setup step that provisions it, and a refresh
+that rewrote a file reports the master-run restart a loop that loaded changed
+bound settings still owes. `tests/fault-class-doctor-credential.test.js`
+replays the recorded 401 stream end to end against a stub control plane and
+audits the live installation when run on the coordinator host.
