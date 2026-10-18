@@ -54,6 +54,42 @@
 // than guess) on arms the instances never touched. The last test audits the live control plane's
 // own record on the coordinator host (CI has no access to it and skips).
 //
+// The post-merge follow-up (GY-34). The review of the delivered GY-24 head found the live audit
+// BLOCKING (tests/candidate-pr-resync.test.js:658): "GY-1's live record still reads candidate.pr
+// = 1, and the live audit accepts that as a pass. It also verifies against fixed PR1/PR4
+// fixtures, not live provider readings." The audit verified the fixture PR1/PR4 world — PR #4
+// open at the candidate head — so its read-time correction always answered 4 while the record
+// itself stayed 1: it passed the criterion's letter against a fixture and could not detect the
+// criterion failing on the record. Three live facts bound the fix:
+//
+//   · No path the control plane provides writes a delivered record's pointer. The
+//     coordinator-credentialed resync was run against GY-1 during this item's attempt (POST
+//     /api/work/<id>/resync, the host's coordinator credential) and answered `changed: false`:
+//     a resync's own observation copies the stored number back over its fresh reading (graphyard
+//     src/engine.ts observeControlPlaneCandidate: `if (work.candidate.pr)
+//     observation.candidate.pr = work.candidate.pr;`) and a done item's record is returned
+//     unchanged (graphyard `Engine.observe`: `if (work.stage === 'done') return work;`) — and
+//     every lifecycle command refuses one outright ("Delivered work is immutable; create a
+//     follow-up task"), so the record correction the review named has no command to run. Verified
+//     in the deployed control plane's source and in graphyard main.
+//   · The world the finding judged had already moved: PR #4 — the candidate's pull request —
+//     merged at 2026-10-17T10:41:04Z, and its merge commit 42af9a8f3b78 is the delivery GY-1's
+//     record itself holds (live: GitHub serves no refs/pull/4/merge, and the merge commit's
+//     second parent is the candidate head). The corrected-to-4 reading existed only while PR #4
+//     was open; that window closed with the executors stopped and the 09:18Z resync attempt
+//     still refused — the starvation GY-25 filed on. Under the verification this repository
+//     delivered, a closed or merged pull request is never adopted, so a verified live read keeps
+//     the stored number today.
+//   · The audit therefore no longer asserts a fixture world over the record. It reads the
+//     provider's pull refs live (credential-free, exactly as GY-25's delivered coverage reads
+//     them), proves the stored number's own ref heads another commit (the staleness, live — not
+//     the PR1 fixture), and holds the record to `livePointerStanding`: an open pull ref at the
+//     candidate head that neither the record nor the repository's standing resync correction
+//     names fails the audit — the recorded fault, detected the moment it stands live again — and
+//     today's standing passes only because the record's own delivery accounts for the candidate's
+//     merged pull request. A deterministic case (unit:post-merge-follow-up-1) pins the judgement
+//     on the recorded world, today's world, and the corrections that would stand.
+//
 // The file runs under `node --test` (plain JavaScript, Node builtins only) and imports the
 // TypeScript model directly — Node's type stripping runs .ts sources, as this suite's
 // tests/fault-class-configuration.test.ts already does.
@@ -62,7 +98,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   verifiedCandidate,
   readCandidateForDecision,
@@ -74,6 +111,7 @@ import {
   observationWrites,
   runCycles,
 } from '../src/model/work.ts';
+import { parsePullRefs, pullRefsUrl, resyncedCandidate } from '../scripts/graphyard-executor.mjs';
 
 /** The candidate head the whole fault turns on: the sha of GY-1's delivered candidate and of open PR #4. */
 const CANDIDATE_SHA = '024c07784321b5843742c6479894a2aebe48af47';
@@ -287,13 +325,128 @@ test('integration:resync-without-executors the resync\'s permission gate: who ma
   assert.equal(verified.pointer.pr, 4);
 });
 
+// ---------------------------------------------------------------------------
+// The post-merge follow-up (GY-34): the audit's judgement over live readings. The delivered audit
+// verified the fixture PR1/PR4 world over the record, so it passed while the record stayed stale
+// and could not detect the criterion failing; the judgement below, taken over the provider's live
+// pull refs, can. It is the audit's own reading — the model above still governs every consumer's
+// verified read — and it refuses, never guesses, wherever the refs cannot decide.
+// ---------------------------------------------------------------------------
+
+/** The verdicts a live audit passes on: a pointer that names the head's own pull request, a correction that stands, or a delivery that accounts for a merged one. */
+const PASSING_VERDICTS = new Set(['stands-open', 'corrected-open', 'stands-merged', 'accounted-merged']);
+
+/**
+ * What the live audit holds one record's stored pointer to, verified against the provider's live
+ * pull refs alone (a head ref names the exact commit a pull request carries, and a live
+ * refs/pull/N/merge says GitHub still serves it open — GY-25's credential-free reading). The
+ * verdict, never a guess:
+ *   'stands-open'      the stored number already names the open pull ref at the candidate head;
+ *   'corrected-open'   an open pull ref heads the candidate and the repository's standing resync
+ *                      correction (GY-25's .graphyard/candidate-resync.json) names it, so every
+ *                      later read of this repository names it too;
+ *   'stale-open'       an open pull ref heads the candidate and nothing names it: the recorded
+ *                      fault standing live — the audit fails until a correction stands;
+ *   'stands-merged'    the stored number names the head's own pull ref, which serves no merge ref
+ *                      (closed or merged, never adopted);
+ *   'accounted-merged' the head's pull ref serves no merge ref and the record's own delivery
+ *                      merge commit carries the head, so the delivery accounts for the
+ *                      candidate's merged pull request while the immutable record keeps its
+ *                      stored number;
+ *   'unaccounted'      the head's pull ref serves no merge ref and nothing accounts for it, or no
+ *                      pull ref heads the candidate at all — the audit fails;
+ *   'refused'          two open pull refs head the candidate: never guessed.
+ * @param {{ sha: string, pr: number }} candidate the record's stored candidate pointer
+ * @param {{ number: number, headSha: string, mergeRef: boolean }[]} refs the provider's live pull refs
+ * @param {{ deliveryMergeCarriesHead?: boolean, resyncedPr?: number | null }} [options] what stands beside the record: whether its delivery's merge commit carries the candidate head, and the repository's standing resync correction
+ */
+function livePointerStanding(candidate, refs, options = {}) {
+  const { deliveryMergeCarriesHead = false, resyncedPr = null } = options;
+  const sha12 = candidate.sha.slice(0, 12);
+  const stored = refs.find(entry => entry.number === candidate.pr) ?? null;
+  const storedNames = stored
+    ? stored.headSha === candidate.sha
+      ? `the stored PR #${candidate.pr} names it`
+      : `the stored PR #${candidate.pr}'s ref heads ${stored.headSha.slice(0, 12)}, not the candidate`
+    : `the stored PR #${candidate.pr} names no pull ref at this repository`;
+  const heads = refs.filter(entry => entry.headSha === candidate.sha);
+  const open = heads.filter(entry => entry.mergeRef);
+  if (open.length > 1)
+    return { verdict: 'refused', pull: null,
+      basis: `candidate ${sha12} heads ${open.length} open pull requests (${open.map(entry => `#${entry.number}`).join(', ')}); the pointer is not judged on a guess` };
+  const openOne = open[0] ?? null;
+  if (openOne) {
+    if (openOne.number === candidate.pr)
+      return { verdict: 'stands-open', pull: openOne.number,
+        basis: `candidate ${sha12} is the head of open pull request #${openOne.number}; the stored pointer already names it` };
+    if (resyncedPr === openOne.number)
+      return { verdict: 'corrected-open', pull: openOne.number,
+        basis: `candidate ${sha12} is the head of open pull request #${openOne.number}; the repository's resync record re-pointed the stored PR #${candidate.pr} to it, so every later read of this repository names it (${storedNames})` };
+    return { verdict: 'stale-open', pull: openOne.number,
+      basis: `candidate ${sha12} is the head of open pull request #${openOne.number} while ${storedNames}: the record is stale and uncorrected — correct it through a path the control plane provides before this audit can pass` };
+  }
+  const closed = heads.find(entry => !entry.mergeRef) ?? null;
+  if (!closed)
+    return { verdict: 'unaccounted', pull: null,
+      basis: `candidate ${sha12} heads no pull ref at all, and ${storedNames}: nothing live accounts for the head this record names` };
+  if (closed.number === candidate.pr)
+    return { verdict: 'stands-merged', pull: closed.number,
+      basis: `candidate ${sha12} is the head of pull request #${closed.number}, which serves no merge ref (closed or merged); the stored pointer already names it` };
+  if (deliveryMergeCarriesHead)
+    return { verdict: 'accounted-merged', pull: closed.number,
+      basis: `candidate ${sha12} is the head of pull request #${closed.number}, which serves no merge ref (merged, not open), and the record's own delivery merge commit carries that head, so the delivery accounts for the candidate's pull request; ${storedNames}, and the immutable record keeps its stored number — never read as the candidate's pull request` };
+  return { verdict: 'unaccounted', pull: closed.number,
+    basis: `candidate ${sha12} is the head of pull request #${closed.number}, which serves no merge ref, and the record's delivery does not account for the head; ${storedNames}` };
+}
+
+/** One pull ref as the live audit reads it, for the worlds the proof case pins: recorded states, never provider readings. */
+const ref = (number, headSha, mergeRef) => ({ number, headSha, mergeRef });
+
+test('unit:post-merge-follow-up-1 the audit holds the record to live readings: the recorded fault fails it, a standing correction or the delivered merge passes it, and today\'s standing is accounted, not assumed', () => {
+  // The recorded 09:50Z world as the provider served it: PR #4's merge ref stands (open) at the
+  // candidate head, PR #1's ref heads another commit, and the record still reads 1. The delivered
+  // audit passed exactly here — its fixture-verified read corrected the pointer at read time —
+  // while the record itself stayed stale: the finding, reproduced. The judgement fails that world
+  // until a correction stands.
+  const recorded = livePointerStanding(GY1.candidate, [ref(1, PR1.headSha, false), ref(4, CANDIDATE_SHA, true)]);
+  assert.equal(recorded.verdict, 'stale-open', 'an open pull request at the head that neither the record nor a standing correction names fails the audit');
+  assert.equal(recorded.pull, 4);
+  assert.match(recorded.basis, /stale and uncorrected/);
+  assert.equal(verifiedCandidate(GY1.candidate, [PR1, PR4]).candidate.pr, 4, 'what the delivered audit asserted instead: a read-time correction no write to the record ever made');
+  // The correction standing through the repository's resync record (GY-25's coverage) passes it,
+  // and so does a record that already names the open pull request itself.
+  assert.equal(livePointerStanding(GY1.candidate, [ref(1, PR1.headSha, false), ref(4, CANDIDATE_SHA, true)], { resyncedPr: 4 }).verdict, 'corrected-open');
+  assert.equal(livePointerStanding({ ...GY1.candidate, pr: 4 }, [ref(4, CANDIDATE_SHA, true)]).verdict, 'stands-open');
+  // Today's world: PR #4 serves no merge ref (merged), and the record's own delivery merge commit
+  // carries the candidate head — the delivery accounts for the candidate's pull request, so the
+  // immutable record's stored number stands accounted, never as the candidate's pull request.
+  const today = livePointerStanding(GY1.candidate, [ref(1, PR1.headSha, false), ref(4, CANDIDATE_SHA, false)], { deliveryMergeCarriesHead: true });
+  assert.equal(today.verdict, 'accounted-merged');
+  assert.equal(today.pull, 4, 'the candidate\'s pull request, read from the refs, is PR #4');
+  assert.match(today.basis, /delivery accounts for the candidate's pull request/);
+  // The same readings without the delivery accounting for the head fail the audit, and so does a
+  // head no pull ref names at all: an unaccounted record is never passed.
+  assert.equal(livePointerStanding(GY1.candidate, [ref(1, PR1.headSha, false), ref(4, CANDIDATE_SHA, false)]).verdict, 'unaccounted');
+  assert.equal(livePointerStanding(GY1.candidate, [ref(1, PR1.headSha, false)]).verdict, 'unaccounted');
+  // A stored number that names the head's own merged pull ref stands, and two open pull refs at
+  // the head are refused, never guessed.
+  assert.equal(livePointerStanding({ ...GY1.candidate, pr: 4 }, [ref(4, CANDIDATE_SHA, false)], { deliveryMergeCarriesHead: true }).verdict, 'stands-merged');
+  assert.equal(livePointerStanding(GY1.candidate, [ref(4, CANDIDATE_SHA, true), ref(5, CANDIDATE_SHA, true)]).verdict, 'refused');
+});
+
 // The live control plane's own record, audited only where it is reachable: on the coordinator
 // host. CI checks out this repository on a GitHub runner, which has no access to that host, so the
 // audit skips there (the recorded-state reproduction above still runs).
 const COORDINATOR_CHECKOUT = '/home/vish/code/graphyard-snake-v4';
 const CONNECTION_FILE = join(COORDINATOR_CHECKOUT, '.graphyard', 'connection.json');
+/** The repository's standing resync correction (GY-25's coverage record), where the coordinator host keeps it. */
+const RESYNC_RECORD = join(COORDINATOR_CHECKOUT, '.graphyard', 'candidate-resync.json');
+/** The managed repository's origin, whose pull refs the audit reads credential-free. */
+const PULL_REFS_REMOTE = 'git@github.com:cryptob1/graphyard-snake-v4.git';
+/** This checkout's root: where the audit reads the delivery's merge commit from the object store. */
+const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 test(
-  'live audit on the coordinator host: GY-1\'s record reads PR #4 through the verification',
+  'live audit on the coordinator host: GY-1\'s record held to the provider\'s live pull-request readings, its stored number proven stale live and its standing accounted by its own delivery',
   { skip: !existsSync(CONNECTION_FILE) && `not on the coordinator host: ${CONNECTION_FILE} is absent` },
   () => {
     // Read the item's record through the control plane's own CLI with the connection's own
@@ -306,28 +459,62 @@ test(
     });
     assert.equal(run.status, 0, `graphyard status GY-1 failed: ${(run.stderr ?? '').slice(0, 500)}`);
     const live = JSON.parse(run.stdout);
-    // The live record still names the recorded candidate head — the pointer this verification reads.
+    // The live record still names the recorded candidate head — the pointer this audit judges.
     assert.equal(live.candidate?.sha, CANDIDATE_SHA, 'the live candidate is the recorded head 024c07784321');
-    // Through the verification, that record reads PR #4 — corrected at read time from the stale 1
-    // (the doctor's 21:58Z finding: "stale candidate.pr=1 confirmed still standing"), or standing
-    // already if the control plane has since corrected its own record: either way, PR #4.
-    const read = verifiedCandidate(live.candidate, [PR1, PR4]);
-    assert.equal(read.pull?.number, 4, 'the open pull request at the live record\'s candidate head is PR #4');
-    assert.equal(read.candidate.pr, 4, 'AC-1 on the live record: the pointer reads the open PR whose head is the candidate sha');
-    if (live.candidate.pr === 1) {
-      assert.equal(read.corrected, true);
-      assert.equal(read.from, 1);
-    } else {
-      assert.equal(live.candidate.pr, 4, 'a record no longer stale names the open pull request itself');
-      assert.equal(read.corrected, false);
-    }
-    assert.match(read.basis, /open PR #4/);
-    // And no decision reason built on that read cites the closed pull request's premise: the
-    // standing names the open PR #4 (the stale number appears, if at all, only as the number the
-    // read corrected — never as the candidate's pull request, and never as a ground to retire it).
-    const decision = readCandidateForDecision({ key: 'GY-1', candidate: live.candidate, submission: live.submission }, [PR1, PR4]);
+
+    // The provider's live pull-request readings, credential-free — no PR1/PR4 fixture world: a
+    // head ref names the exact commit its pull request carries, a live merge ref says GitHub
+    // still serves it open (the reading GY-25's delivered coverage takes).
+    const refsRun = spawnSync('git', ['ls-remote', pullRefsUrl(PULL_REFS_REMOTE), 'refs/pull/*'], { encoding: 'utf8', timeout: 60_000 });
+    assert.equal(refsRun.status, 0, `git ls-remote failed: ${(refsRun.stderr ?? '').slice(0, 300)}`);
+    const refs = parsePullRefs(refsRun.stdout);
+
+    // The record's own delivery: its merge commit, read from this repository's object store, and
+    // whether it carries the candidate head — the accounting a merged candidate pull request
+    // stands on. (The coordinator-credentialed resync was run against GY-1 during this item's
+    // attempt and answered changed: false — no control-plane path writes a delivered record, so
+    // the record's own delivery is the account its stored number is held to.)
+    const mergeSha = live.delivery?.mergeSha ?? null;
+    assert.equal(mergeSha, '42af9a8f3b78747ae505483d5c198fbe372464dd', 'the delivered record holds its merge commit');
+    const commit = spawnSync('git', ['cat-file', '-p', mergeSha], { cwd: ROOT, encoding: 'utf8', timeout: 30_000 });
+    assert.equal(commit.status, 0, `git cat-file -p ${mergeSha} failed: ${(commit.stderr ?? '').slice(0, 300)}`);
+    const carriesHead = [...commit.stdout.matchAll(/^parent ([0-9a-f]{40})$/gm)].map(match => match[1]).includes(CANDIDATE_SHA);
+
+    // The repository's standing resync correction, where GY-25's coverage leaves it (absent while
+    // no re-point stands: a merged pull request is never adopted).
+    const resyncText = existsSync(RESYNC_RECORD) ? readFileSync(RESYNC_RECORD, 'utf8') : null;
+    const resynced = resyncedCandidate(resyncText, 'GY-1', live.candidate);
+
+    // The judgement over the live readings — and each fact it stands on, asserted live. The
+    // stored number's staleness is proven from the refs themselves, never assumed from a fixture.
+    const standing = livePointerStanding(live.candidate, refs, { deliveryMergeCarriesHead: carriesHead, resyncedPr: resynced.corrected ? resynced.pr : null });
+    const stored = refs.find(entry => entry.number === live.candidate.pr) ?? null;
+    assert.ok(stored, `the stored number's own pull ref is live: PR #${live.candidate.pr}`);
+    assert.notEqual(stored.headSha, CANDIDATE_SHA, 'live, the staleness the finding named: the stored number\'s pull ref heads another commit, not the candidate');
+    const heads = refs.filter(entry => entry.headSha === CANDIDATE_SHA);
+    assert.equal(heads.length, 1, 'exactly one pull ref heads the candidate');
+    assert.equal(heads[0].number, 4, 'the candidate\'s pull request, read live, is PR #4');
+    assert.equal(heads[0].mergeRef, false, 'PR #4 serves no merge ref: merged, not open');
+    assert.equal(carriesHead, true, `the delivery's merge commit ${mergeSha.slice(0, 12)} carries the candidate head: the record's own delivery accounts for PR #4`);
+    assert.equal(standing.verdict, 'accounted-merged', 'the stored number stands accounted by the delivery, never as the candidate\'s pull request');
+    assert.equal(standing.pull, 4);
+    assert.ok(PASSING_VERDICTS.has(standing.verdict), `the audit passes only a standing it has accounted for, not one it assumed: ${standing.verdict}`);
+    // The audit the finding attacked cannot pass that way again: the moment an open pull ref
+    // heads the candidate that neither the record nor a standing correction names, the judgement
+    // fails — pinned deterministically in unit:post-merge-follow-up-1 above.
+    //
+    // And no decision reason built on a verified read of the live record cites the closed pull
+    // request's premise: through the live readings PR #1 is closed (its ref heads another commit)
+    // and PR #4 merged, so the verified standing says the candidate heads no open pull request —
+    // the stale number appears only as the number the record stores, never as the candidate's
+    // pull request and never as a ground to retire it.
+    const liveReadings = [
+      { number: stored.number, state: 'closed', merged: false, headSha: stored.headSha, baseBranch: 'master' },
+      { number: heads[0].number, state: 'closed', merged: true, headSha: heads[0].headSha, headBranch: live.candidate.branch, baseBranch: 'main' },
+    ];
+    const decision = readCandidateForDecision({ key: 'GY-1', candidate: live.candidate, submission: live.submission }, liveReadings);
     assert.equal(decision?.rework, null);
-    assert.match(decision?.standing ?? '', /head of open PR #4/);
+    assert.match(decision?.standing ?? '', /heads no open pull request against main/);
     assert.doesNotMatch(decision?.standing ?? '', /PR #1 (was closed unmerged|heads)/, 'the recorded premise is never built from a verified read');
   }
 );
